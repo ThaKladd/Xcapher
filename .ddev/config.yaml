@@ -9,9 +9,14 @@ additional_fqdns: []
 database:
     type: mariadb
     version: "11.8"
+webimage_extra_packages: ['php${DDEV_PHP_VERSION}-pcov']
 use_dns_when_possible: true
 composer_version: "2"
-web_environment: []
+web_environment:
+    - XCAPHER_MYSQL_DATABASE=db
+    - XCAPHER_MYSQL_HOST=db
+    - XCAPHER_MYSQL_PASSWORD=db
+    - XCAPHER_MYSQL_USER=db
 nodejs_version: "24"
 corepack_enable: false
 

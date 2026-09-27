@@ -10,3 +10,6 @@
 /phpstan.dist.neon  export-ignore
 /phpunit.xml.dist   export-ignore
 /CLAUDE.md          export-ignore
+/.ddev              export-ignore
+/infection.json5    export-ignore
+/CONTRIBUTING.md    export-ignore

@@ -6,6 +6,7 @@ namespace Xcapher\Tests;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\TestCase;
 use Xcapher\Xcapher;
 
@@ -119,5 +120,44 @@ final class SanitizeTest extends TestCase
         self::assertSame(254, \strlen($name));
         self::assertStringEndsWith('ø.txt', $name);
         self::assertTrue(mb_check_encoding($name, 'UTF-8'));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function reservedNameProvider(): iterable
+    {
+        yield 'lower case device' => ['con', '_con'];
+        yield 'numbered device' => ['COM1.log', '_COM1.log'];
+        yield 'device as suffix' => ['XCON', 'XCON'];
+        yield 'device as prefix' => ['CONSOLE', 'CONSOLE'];
+    }
+
+    #[DataProvider('reservedNameProvider')]
+    public function testFilenameReservedNames(string $value, string $expected): void
+    {
+        self::assertSame($expected, x($value)->filename());
+    }
+
+    public function testFilenameLengthBoundaries(): void
+    {
+        $exact = str_repeat('a', 251) . '.txt';
+        self::assertSame($exact, x($exact)->filename());
+
+        self::assertSame(str_repeat('a', 251) . '.txt', x(str_repeat('a', 300) . '.txt')->filename());
+        self::assertSame(str_repeat('a', 255), x(str_repeat('a', 300))->filename());
+
+        $longExtension = '.' . str_repeat('e', 15);
+        self::assertSame(str_repeat('a', 239) . $longExtension, x(str_repeat('a', 300) . $longExtension)->filename());
+
+        $tooLongExtension = '.' . str_repeat('e', 16);
+        self::assertSame(str_repeat('a', 255), x(str_repeat('a', 300) . $tooLongExtension)->filename());
+    }
+
+    #[RequiresPhpExtension('intl')]
+    public function testSlugTransliteratesOtherScriptsWithIntl(): void
+    {
+        self::assertSame('privet-mir', x('Привет, мир')->slug());
+        self::assertSame('aaeo', x('ÅÆØ')->slug());
     }
 }

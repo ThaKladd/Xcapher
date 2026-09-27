@@ -23,6 +23,9 @@ The 1.0 rewrite. See "Upgrading from 0.x" in the README.
 - The `XcapherException` interface, with `CastException` and `EscapeException`.
 - PDO support for SQL escaping.
 - A PHPUnit test suite, PHPStan (level max, strict rules), PHP-CS-Fixer (PER-CS 3.0) and GitHub Actions CI.
+- Tests that run the SQL helpers against real MariaDB/MySQL and PostgreSQL servers (mysqli, ext-pgsql and PDO).
+- Infection mutation testing (minimum 90% MSI), code coverage reports and Dependabot.
+- `SECURITY.md`, `CONTRIBUTING.md` and a DDEV configuration.
 
 ### Changed
 
@@ -31,6 +34,7 @@ The 1.0 rewrite. See "Upgrading from 0.x" in the README.
   form.
 - `array()` on objects returns their public properties.
 - `bool()` reads strings such as `"false"`, `"off"` and `"no"` as `false`.
+- `shellArg()` rejects arguments longer than 131071 bytes (the Linux per-argument limit) on every PHP build.
 
 ### Removed
 

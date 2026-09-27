@@ -1,6 +1,7 @@
 # Xcapher
 
 [![CI](https://github.com/ThaKladd/Xcapher/actions/workflows/ci.yml/badge.svg)](https://github.com/ThaKladd/Xcapher/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/ThaKladd/Xcapher/graph/badge.svg)](https://codecov.io/gh/ThaKladd/Xcapher)
 ![PHP](https://img.shields.io/badge/php-%E2%89%A5%208.5-777bb4)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -39,6 +40,7 @@ closed resources and generators that throw.
 - [Error handling](#error-handling)
 - [Upgrading from 0.x](#upgrading-from-0x)
 - [Development](#development)
+- [Security](#security)
 - [License](#license)
 
 ## Requirements
@@ -277,17 +279,25 @@ try {
 
 ## Development
 
+The project ships a [DDEV](https://ddev.com) setup with PHP 8.5, MariaDB and pcov:
+
 ```bash
-composer install
-composer test       # PHPUnit
-composer analyse    # PHPStan, level max with strict rules
-composer lint       # PHP-CS-Fixer (PER-CS 3.0 + PHP 8.5 migration), dry run
-composer fix        # apply the coding standard
-composer check      # lint + analyse + test
+ddev start
+ddev composer install
+ddev composer check          # coding standard + PHPStan (level max) + PHPUnit
+ddev composer test:coverage  # tests with coverage; HTML report in build/coverage
+ddev composer mutation       # Infection mutation testing (minimum 90% MSI)
+ddev composer fix            # apply the coding standard
+ddev launch                  # the interactive examples page
 ```
 
-Run a single test or test class with `vendor/bin/phpunit --filter testSlug`. The runnable examples are in
-`examples/index.php` (`php examples/index.php`).
+Run a single test with `ddev exec vendor/bin/phpunit --filter testSlug`. The SQL helpers are also tested
+against real MariaDB/MySQL and PostgreSQL servers. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to run
+those tests and what a pull request needs.
+
+## Security
+
+Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in public issues.
 
 ## License
 

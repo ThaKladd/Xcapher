@@ -8,8 +8,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
+    name: PHP ${{ matrix.php }} (${{ matrix.dependencies }} dependencies)
     runs-on: ubuntu-latest
 
     strategy:
@@ -18,7 +23,33 @@ jobs:
         php: ['8.5']
         dependencies: [lowest, highest]
 
-    name: PHP ${{ matrix.php }} (${{ matrix.dependencies }})
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      XCAPHER_MYSQL_HOST: 127.0.0.1
+      XCAPHER_MYSQL_USER: root
+      XCAPHER_MYSQL_PASSWORD: root
+      XCAPHER_MYSQL_DATABASE: test
+      XCAPHER_PGSQL_HOST: 127.0.0.1
+      XCAPHER_PGSQL_USER: postgres
+      XCAPHER_PGSQL_PASSWORD: postgres
 
     steps:
       - uses: actions/checkout@v4
@@ -26,8 +57,8 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: mbstring, intl, pdo_sqlite
-          coverage: none
+          extensions: mbstring, intl, pdo_sqlite, mysqli, pdo_mysql, pgsql, pdo_pgsql
+          coverage: pcov
 
       - uses: ramsey/composer-install@v3
         with:
@@ -39,5 +70,17 @@ jobs:
       - name: Static analysis
         run: composer analyse
 
-      - name: Tests
-        run: composer test
+      - name: Tests with coverage
+        run: vendor/bin/phpunit --fail-on-skipped --coverage-text --coverage-clover=build/coverage.xml
+
+      - name: Mutation testing
+        if: matrix.dependencies == 'highest'
+        run: composer mutation -- --threads=max --logger-github
+
+      - name: Upload coverage to Codecov
+        if: matrix.dependencies == 'highest'
+        uses: codecov/codecov-action@v5
+        with:
+          files: build/coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

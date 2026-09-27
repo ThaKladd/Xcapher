@@ -9,19 +9,24 @@ Xcapher (`xcapher/xcapher`) is a Composer library for PHP ≥ 8.5 with no runtim
 ## Commands
 
 ```bash
-composer check                          # lint + analyse + test (what CI runs)
-composer test                           # PHPUnit 13
-composer analyse                        # PHPStan level max + strict rules + phpunit extension
-composer lint                           # PHP-CS-Fixer dry run (PER-CS 3.0, PHP 8.5 migration)
-composer fix                            # apply coding standard
-vendor/bin/phpunit --filter testSlug    # single test (or a class name, e.g. --filter SqlTest)
-php examples/index.php                  # runnable examples
+ddev composer check                          # lint + analyse + test
+ddev composer test                           # PHPUnit 13
+ddev composer test:coverage                  # coverage (pcov); HTML in build/coverage
+ddev composer mutation                       # Infection, fails below 90% MSI
+ddev composer analyse                        # PHPStan level max + strict rules + phpunit extension
+ddev composer lint                           # PHP-CS-Fixer dry run (PER-CS 3.0, PHP 8.5 migration)
+ddev composer fix                            # apply coding standard
+ddev exec vendor/bin/phpunit --filter testSlug   # single test (or a class, e.g. --filter SqlTest)
+ddev launch                                  # examples/index.php as a styled page (docroot: examples)
 ```
 
 PHPUnit is configured strictly (`phpunit.xml.dist`):
 - Tests fail on any warning, notice or deprecation.
-- Every test class must declare `#[CoversClass]` or `#[CoversNothing]`.
+- Every test class must declare `#[CoversClass]` or `#[CoversNothing]`. When coverage is on, classes a test reaches indirectly (typically `CastException`) must be declared with `#[UsesClass]`, or the test is marked risky and fails; Infection runs with coverage, so this matters there.
 - Tests run in random order.
+- `src/functions.php` and `src/helpers.php` are excluded from coverage.
+
+CI (`.github/workflows/ci.yml`) runs everything against MariaDB and PostgreSQL service containers with `--fail-on-skipped`, then runs Infection and uploads coverage to Codecov. Locally, `--fail-on-skipped` fails because the PostgreSQL tests skip without a server; that is expected.
 
 PHPStan guidance: fix the underlying types rather than adding ignores or `@var` overrides.
 
@@ -52,4 +57,10 @@ The host has no PHP installed. Run everything through DDEV (project `xcapher`, P
 
 Keep tests independent of the PHP build and the OS. PHP's own limits differ between builds; `escapeshellarg()` is one example, which is why `shellArg()` enforces a fixed maximum length itself.
 
-The SQL tests use in-memory SQLite through PDO. The mysqli and PgSql code paths in `escape()`/`quote()` have no tests against a live database.
+SQL tests come in two kinds:
+- `tests/SqlTest.php` uses in-memory SQLite through PDO and always runs.
+- `tests/Live/` (group `database`) runs against real servers through mysqli, ext-pgsql and PDO. It skips unless `XCAPHER_MYSQL_*` or `XCAPHER_PGSQL_*` environment variables are set. DDEV sets the MySQL ones for its MariaDB through `web_environment` in `.ddev/config.yaml`. For PostgreSQL, see CONTRIBUTING.md; it uses a temporary `postgres` container on the `ddev_default` network.
+
+DDEV's web image installs `php8.5-pcov` through `webimage_extra_packages`.
+
+Tool quirk: literal `\uXXXX` text written through the Write/Edit tools, or in heredocs, can be turned into the actual character. After writing tests that contain JS or JSON unicode escapes, check the file, and generate those lines with `chr(92)` if needed.

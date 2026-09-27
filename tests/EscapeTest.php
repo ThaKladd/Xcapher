@@ -6,6 +6,7 @@ namespace Xcapher\Tests;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use Xcapher\Exception\CastException;
 use Xcapher\Exception\EscapeException;
@@ -14,6 +15,7 @@ use Xcapher\Xcapher;
 use function Xcapher\x;
 
 #[CoversClass(Xcapher::class)]
+#[UsesClass(CastException::class)]
 final class EscapeTest extends TestCase
 {
     public function testHtml(): void
@@ -233,5 +235,86 @@ final class EscapeTest extends TestCase
         self::assertSame('a\#b/c', x('a#b/c')->regex('#'));
         self::assertSame('a/b', x('a/b')->regex(null));
         self::assertSame(1, preg_match('/^' . x('a.b*')->regex() . '$/', 'a.b*'));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function htmlAttrBoundaryProvider(): iterable
+    {
+        yield 'last C0 control' => ["\x1F", '&#xFFFD;'];
+        yield 'DEL' => ["\x7F", '&#xFFFD;'];
+        yield 'last C1 control' => ["\u{9F}", '&#xFFFD;'];
+        yield 'first after C1' => ["\u{A0}", '&#xA0;'];
+        yield 'last two-digit entity' => ["\u{FF}", '&#xFF;'];
+        yield 'first four-digit entity' => ["\u{100}", '&#x0100;'];
+    }
+
+    #[DataProvider('htmlAttrBoundaryProvider')]
+    public function testHtmlAttrBoundaries(string $value, string $expected): void
+    {
+        self::assertSame($expected, x($value)->htmlAttr());
+    }
+
+    public function testHtmlEntityDefaults(): void
+    {
+        self::assertSame('&#039;&quot;', x('\'"')->htmlEntityEncode());
+        self::assertSame("\u{FFFD}", x("\xFF")->htmlEntityEncode());
+        self::assertSame('\'"', x('&#039;&quot;')->htmlEntityDecode());
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function jsBoundaryProvider(): iterable
+    {
+        yield 'last ASCII' => ["\x7F", '\x7F'];
+        yield 'first non-ASCII' => ["\u{80}", '\u0080'];
+        yield 'last BMP' => ["\u{FFFF}", '\uFFFF'];
+        yield 'first astral' => ["\u{10000}", '\uD800\uDC00'];
+        yield 'odd astral' => ["\u{10437}", '\uD801\uDC37'];
+        yield 'last code point' => ["\u{10FFFF}", '\uDBFF\uDFFF'];
+    }
+
+    #[DataProvider('jsBoundaryProvider')]
+    public function testJsBoundaries(string $value, string $expected): void
+    {
+        self::assertSame($expected, x($value)->js());
+    }
+
+    public function testJsonDefaults(): void
+    {
+        self::assertSame('"<a>"', x('<a>')->json());
+        self::assertSame("{\n    \"a\": \"/å\"\n}", x(['a' => '/å'])->json(pretty: true));
+    }
+
+    public function testJsonDecodeDefaultDepthAllows511NestedArrays(): void
+    {
+        self::assertIsArray(x(str_repeat('[', 511) . str_repeat(']', 511))->jsonDecode());
+
+        $this->expectException(CastException::class);
+        x(str_repeat('[', 512) . str_repeat(']', 512))->jsonDecode();
+    }
+
+    public function testCastExceptionMessageIncludesTheReason(): void
+    {
+        $this->expectExceptionMessage('Cannot convert value of type string to decoded JSON: Syntax error');
+        x('{invalid')->jsonDecode();
+    }
+
+    public function testBase64UrlDecodePadsEveryLength(): void
+    {
+        self::assertSame('ab', x('YWI')->base64UrlDecode());
+        self::assertSame('ab', x('YWI=')->base64UrlDecode());
+        self::assertSame('abc', x('YWJj')->base64UrlDecode());
+        self::assertSame('a', x(" YQ\n")->base64UrlDecode());
+    }
+
+    public function testInvalidUtf8HandlingRestoresTheSubstituteCharacter(): void
+    {
+        $before = mb_substitute_character();
+
+        self::assertSame("\u{FFFD}", x("\xFF")->lower());
+        self::assertSame($before, mb_substitute_character());
     }
 }

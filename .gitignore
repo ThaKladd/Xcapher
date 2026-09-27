@@ -1,6 +1,21 @@
+# Dependencies. composer.lock is not committed for libraries: consumers resolve their own versions,
+# and CI tests against both the lowest and highest allowed dependencies.
 /vendor/
+/composer.lock
+
+# Tool caches and reports
 /.phpunit.cache/
 /.php-cs-fixer.cache
-/phpstan.neon
+/.infection/
+/build/
+
+# Local overrides of the committed *.dist configuration files
 /phpunit.xml
+/phpstan.neon
 /.php-cs-fixer.php
+
+# Editors and operating systems
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db

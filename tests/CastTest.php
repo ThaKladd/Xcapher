@@ -336,4 +336,11 @@ final class CastTest extends TestCase
         $this->expectExceptionMessage('Cannot convert value of type array to string.');
         x([])->string();
     }
+
+    public function testIntClampsExactlyAtTheBoundary(): void
+    {
+        self::assertSame(\PHP_INT_MAX, x(9.2233720368547758E+18)->int());
+        self::assertSame(\PHP_INT_MIN, x(-9.2233720368547758E+18)->int());
+        self::assertSame(9007199254740992, x(9007199254740992.0)->int());
+    }
 }

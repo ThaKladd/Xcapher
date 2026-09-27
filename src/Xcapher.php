@@ -176,7 +176,6 @@ final readonly class Xcapher
         $value = $this->value;
 
         return match (true) {
-            \is_bool($value) => $value,
             \is_float($value) && is_nan($value) => true,
             \is_string($value) => self::parseBool($value),
             $value instanceof \BackedEnum => \is_string($value->value) ? self::parseBool($value->value) : $value->value !== 0,
@@ -782,7 +781,7 @@ final readonly class Xcapher
      */
     public function email(): string
     {
-        return (string) filter_var(trim($this->castString()), \FILTER_SANITIZE_EMAIL);
+        return (string) filter_var($this->castString(), \FILTER_SANITIZE_EMAIL);
     }
 
     /**
@@ -793,7 +792,7 @@ final readonly class Xcapher
      */
     public function url(): string
     {
-        return (string) filter_var(trim($this->castString()), \FILTER_SANITIZE_URL);
+        return (string) filter_var($this->castString(), \FILTER_SANITIZE_URL);
     }
 
     /**
@@ -811,7 +810,7 @@ final readonly class Xcapher
             $text = \is_string($transliterated) ? $transliterated : $text;
         }
 
-        $text = self::replace('/[^a-z0-9]+/', strtolower($text), static fn(): string => $separator);
+        $text = self::replace('/[^a-z0-9]+/', $text, static fn(): string => $separator);
 
         return $separator === '' ? $text : self::replace('/^(?:' . preg_quote($separator, '/') . ')+|(?:' . preg_quote($separator, '/') . ')+$/', $text, static fn(): string => '');
     }
@@ -1309,7 +1308,7 @@ final readonly class Xcapher
         }
 
         if (preg_match(self::NUMBER_PREFIX, $text, $match) === 1) {
-            $prefix = trim($match[0]);
+            $prefix = $match[0];
 
             return is_numeric($prefix) ? $prefix + 0 : 0;
         }

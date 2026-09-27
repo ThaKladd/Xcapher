@@ -6,7 +6,9 @@ namespace Xcapher\Tests;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
+use Xcapher\Exception\CastException;
 use Xcapher\Tests\Fixtures\BrokenText;
 use Xcapher\Tests\Fixtures\EmptyBag;
 use Xcapher\Tests\Fixtures\Text;
@@ -17,6 +19,7 @@ use function Xcapher\x;
 
 #[CoversClass(Xcapher::class)]
 #[CoversClass(Type::class)]
+#[UsesClass(CastException::class)]
 final class ValidateTest extends TestCase
 {
     /**
@@ -169,5 +172,24 @@ final class ValidateTest extends TestCase
         self::assertFalse(x([])->matches('/.*/'));
         self::assertFalse(x('abc')->matches('/(unclosed/'));
         self::assertFalse(x('abc')->matches('not a pattern'));
+    }
+
+    public function testIsIntegerRejectsTrailingCharacters(): void
+    {
+        self::assertFalse(x('12abc')->isInteger());
+        self::assertFalse(x("12\n")->isInteger());
+        self::assertFalse(x('abc12')->isInteger());
+    }
+
+    public function testIsBase64RejectsATrailingNewline(): void
+    {
+        self::assertFalse(x("aGk=\n")->isBase64());
+    }
+
+    public function testEveryScalarTypeIsScalar(): void
+    {
+        $scalars = array_filter(Type::cases(), static fn(Type $type): bool => $type->isScalar());
+
+        self::assertSame([Type::Bool, Type::Int, Type::Float, Type::String], array_values($scalars));
     }
 }
