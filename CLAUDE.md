@@ -32,7 +32,7 @@ PHPStan guidance: fix the underlying types rather than adding ignores or `@var` 
 
 ## Architecture
 
-- `src/Xcapher.php` holds nearly all the logic. It is a `final readonly` class wrapping one `mixed` value, and its public methods are grouped by section comments: casting, HTML/JS/CSS, URL/JSON/Base64, SQL/shell/regex, sanitizing and validation.
+- `src/Xcapher.php` holds nearly all the logic. It is a `final readonly` class wrapping one `mixed` value, and its public methods are grouped by section comments: introspection, casting (including enums, objects, dates, allowlists and closures), arrays, CSV, HTML/JS/CSS, URL/JSON/Base64, SQL/shell/regex, sanitizing and validation. Recursive array methods stop at `MAX_DEPTH` (512) so self-referencing arrays throw instead of looping forever.
 - `src/Type.php` and `src/Database.php` are enums. `Database::detect()` maps a mysqli, PgSql or PDO connection to a SQL dialect, and `Database::quoteIdentifier()` quotes identifiers for that dialect.
 - `src/Exception/` contains the `XcapherException` marker interface, implemented by `CastException` (conversion failures) and `EscapeException` (escaping failures).
 - `src/functions.php` defines `Xcapher\x()`. `src/helpers.php` defines the global `x()`, guarded by `function_exists`. Both are loaded through `autoload.files`.
@@ -40,7 +40,7 @@ PHPStan guidance: fix the underlying types rather than adding ignores or `@var` 
 ### The robustness contract
 
 The central design rule: **every public method returns its declared type or throws an `XcapherException`**. It must never emit a PHP warning, notice or deprecation, and never leak a `TypeError` or `ValueError`. `tests/RobustnessTest.php` enforces this. It uses reflection to call every public method, including new ones, against more than 40 edge-case values, with an error handler that turns warnings into failures. When adding a method:
-- If it takes required parameters, add representative arguments to `$withArguments` in `RobustnessTest::calls()`, or the sweep only calls its zero-argument form.
+- If it takes required parameters, add representative arguments to `$withArguments` in `RobustnessTest::calls()`, or the sweep only calls its zero-argument form. Include awkward arguments too (NUL bytes, empty arrays, non-string list entries), since callers without static analysis can pass them. For arguments the signature forbids statically (for example a class that is not an enum), use `self::invalidArgument()`, which calls the method through reflection.
 - Wrap native functions that can warn (for example `htmlentities` with a bad charset) in `self::guard()`, which turns warnings and errors into `CastException`. Database calls go through `self::escaping()`, which throws `EscapeException`.
 - Watch for PHP 8.5 behavior: coercing `NAN` to string, bool or object emits a warning, and so does casting an out-of-range float to int. That is why `castString()`, `bool()`, `object()` and `castInt()` handle these cases explicitly.
 

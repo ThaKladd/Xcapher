@@ -6,6 +6,7 @@ namespace Xcapher\Tests;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\UsesClass;
 use PHPUnit\Framework\TestCase;
 use Xcapher\Exception\CastException;
 use Xcapher\Tests\Fixtures\BrokenText;
@@ -22,6 +23,7 @@ use function Xcapher\x;
 
 #[CoversClass(Xcapher::class)]
 #[CoversClass(CastException::class)]
+#[UsesClass(Type::class)]
 final class CastTest extends TestCase
 {
     public function testHelpersAndConstructorsWrapTheValue(): void
@@ -316,6 +318,16 @@ final class CastTest extends TestCase
         $resource = fopen('php://memory', 'r');
 
         self::assertEquals((object) ['a' => 1], x(['a' => 1])->to(Type::Object));
+        self::assertSame($resource, x($resource)->to(Type::Resource));
+    }
+
+    public function testToResourceAcceptsClosedResourcesLikeType(): void
+    {
+        $resource = fopen('php://memory', 'r');
+        self::assertIsResource($resource);
+        fclose($resource);
+
+        self::assertSame(Type::Resource, x($resource)->type());
         self::assertSame($resource, x($resource)->to(Type::Resource));
     }
 

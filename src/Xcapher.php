@@ -25,6 +25,16 @@ final readonly class Xcapher
      */
     private const int MAX_SHELL_ARG_BYTES = 131_071;
 
+    /**
+     * How deep the recursive array methods go before giving up. Self-referencing arrays are infinitely deep.
+     */
+    private const int MAX_DEPTH = 512;
+
+    /**
+     * Characters that make spreadsheet programs treat a CSV field as a formula (OWASP CSV injection).
+     */
+    private const string CSV_FORMULA_TRIGGERS = "=+-@\t\r";
+
     private const string NUMBER_PREFIX = '/^\s*[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/';
 
     /**
@@ -79,6 +89,26 @@ final readonly class Xcapher
         return \in_array($this->type(), $types, true);
     }
 
+    /**
+     * The value's type for messages and logs: "int", "string", "App\User", "resource (stream)", ...
+     */
+    public function debugType(): string
+    {
+        return get_debug_type($this->value);
+    }
+
+    /**
+     * The resource type ("stream", ...), "Unknown" for a closed resource, or null when the value is not a resource.
+     */
+    public function resourceType(): ?string
+    {
+        if (\is_resource($this->value)) {
+            return get_resource_type($this->value);
+        }
+
+        return $this->type() === Type::Resource ? 'Unknown' : null;
+    }
+
     // ------------------------------------------------------------------
     // Casting
     // ------------------------------------------------------------------
@@ -98,7 +128,7 @@ final readonly class Xcapher
             Type::Array => $this->array(),
             Type::Object => $this->object(),
             Type::Null => $this->value === null ? null : throw CastException::create($this->value, 'null'),
-            Type::Resource => \is_resource($this->value) ? $this->value : throw CastException::create($this->value, 'resource'),
+            Type::Resource => $this->type() === Type::Resource ? $this->value : throw CastException::create($this->value, 'resource'),
         };
     }
 
@@ -191,15 +221,18 @@ final readonly class Xcapher
      * preserved. Other objects give their public properties, while enums, dates and closures are wrapped
      * like scalars. Any scalar or resource is wrapped as [$value].
      *
+     * With $deep, nested objects and Traversables are converted the same way, all the way down.
+     *
      * @param array<mixed>|null $default returned instead of throwing when the value cannot be converted
      *
-     * @throws CastException when iterating a Traversable fails, unless a default is given
+     * @throws CastException when iterating a Traversable fails, or (with $deep) the structure is nested more
+     *                       than 512 levels or refers to itself, unless a default is given
      *
      * @return array<mixed>
      */
-    public function array(?array $default = null): array
+    public function array(?array $default = null, bool $deep = false): array
     {
-        return $this->orDefault($this->castArray(...), $default);
+        return $this->orDefault(fn(): array => $deep ? $this->castDeepArray() : $this->castArray(), $default);
     }
 
     /**
@@ -260,6 +293,425 @@ final readonly class Xcapher
         }
 
         return $result;
+    }
+
+    /**
+     * Converts to a case of the given enum.
+     *
+     * Backed enums match on their value: int-backed enums accept ints and whole-number strings ("10"),
+     * and string-backed enums accept strings, ints and Stringable objects. Pure enums match on the exact
+     * case name. A case of the enum is returned as-is.
+     *
+     * @template T of \UnitEnum
+     *
+     * @param class-string<T> $enum
+     * @param T|null $default returned instead of throwing when no case matches
+     *
+     * @throws CastException when $enum is not an enum or no case matches, unless a default is given
+     *
+     * @return T
+     */
+    public function enum(string $enum, ?\UnitEnum $default = null): \UnitEnum
+    {
+        return $this->orDefault(fn(): \UnitEnum => $this->castEnum($enum), $default);
+    }
+
+    /**
+     * @template T of \UnitEnum
+     *
+     * @param class-string<T> $enum
+     *
+     * @return T|null
+     */
+    public function tryEnum(string $enum): ?\UnitEnum
+    {
+        return $this->orNull(fn(): \UnitEnum => $this->castEnum($enum));
+    }
+
+    /**
+     * Returns the value when it is an instance of the given class or interface.
+     *
+     * @template T of object
+     *
+     * @param class-string<T> $class
+     * @param T|null $default returned instead of throwing when the value is not an instance
+     *
+     * @throws CastException when the value is not an instance of $class, unless a default is given
+     *
+     * @return T
+     */
+    public function instanceOf(string $class, ?object $default = null): object
+    {
+        return $this->orDefault(fn(): object => $this->castInstance($class), $default);
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param class-string<T> $class
+     *
+     * @return T|null
+     */
+    public function tryInstanceOf(string $class): ?object
+    {
+        return $this->orNull(fn(): object => $this->castInstance($class));
+    }
+
+    /**
+     * Converts to a DateTimeImmutable.
+     *
+     * Dates are returned as immutable dates. Ints and floats are Unix timestamps, in the default time zone.
+     * Strings are parsed with the given format (see DateTimeInterface::format()), or with PHP's date
+     * parser when no format is given, so relative formats such as "tomorrow" work too. Impossible dates
+     * such as "2023-02-30" are rejected instead of rolling over, and so are empty strings.
+     *
+     * @param \DateTimeImmutable|null $default returned instead of throwing when the value is not a valid date
+     *
+     * @throws CastException when the value is not a valid date, unless a default is given
+     */
+    public function date(?string $format = null, ?\DateTimeImmutable $default = null): \DateTimeImmutable
+    {
+        return $this->orDefault(fn(): \DateTimeImmutable => $this->castDate($format), $default);
+    }
+
+    public function tryDate(?string $format = null): ?\DateTimeImmutable
+    {
+        return $this->orNull(fn(): \DateTimeImmutable => $this->castDate($format));
+    }
+
+    /**
+     * Returns the matching element of an allowlist, which is the safe way to accept input that cannot be
+     * escaped, such as a sort direction or a column name.
+     *
+     * Matching is strict, except that ints and strings with the same string form match each other, so
+     * "5" from a request matches 5. The element from $allowed is returned, never the input itself.
+     *
+     * @template T
+     *
+     * @param array<T> $allowed
+     * @param T|null $default returned instead of throwing when the value is not allowed
+     *
+     * @throws CastException when the value is not in $allowed, unless a default is given
+     *
+     * @return T
+     */
+    public function oneOf(array $allowed, mixed $default = null): mixed
+    {
+        return $this->orDefault(fn(): mixed => $this->castOneOf($allowed), $default);
+    }
+
+    /**
+     * @template T
+     *
+     * @param array<T> $allowed
+     *
+     * @return T|null
+     */
+    public function tryOneOf(array $allowed): mixed
+    {
+        return $this->orNull(fn(): mixed => $this->castOneOf($allowed));
+    }
+
+    /**
+     * Converts a callable (a closure, "strlen", [$object, 'method'], "Class::staticMethod", an invokable
+     * object) to a Closure.
+     *
+     * Only use this on trusted values: turning user input into a callable lets that user choose which
+     * function runs.
+     *
+     * @param \Closure|null $default returned instead of throwing when the value is not callable
+     *
+     * @throws CastException when the value is not callable, unless a default is given
+     */
+    public function closure(?\Closure $default = null): \Closure
+    {
+        return $this->orDefault($this->castClosure(...), $default);
+    }
+
+    public function tryClosure(): ?\Closure
+    {
+        return $this->orNull($this->castClosure(...));
+    }
+
+    // ------------------------------------------------------------------
+    // Arrays
+    // ------------------------------------------------------------------
+
+    /**
+     * Returns the value at a key or dot-separated path, wrapped in a new Xcapher, or the wrapped $default when
+     * any part of the path is missing. Walks arrays, ArrayAccess objects and public object properties, and never
+     * warns about missing keys. A key that literally contains the separator is found too.
+     *
+     * Pass the default here rather than to the cast: a missing path is null, and null casts to "" or 0
+     * without needing the cast's own default.
+     *
+     *     x($_POST)->get('age')->int(0);
+     *     x($json)->get('user.address.city', 'unknown')->string();
+     */
+    public function get(string|int $path, mixed $default = null, string $separator = '.'): self
+    {
+        [$found, $value] = $this->lookup($path, $separator);
+
+        return new self($found ? $value : $default);
+    }
+
+    /**
+     * True when the key or dot-separated path exists, even if its value is null.
+     */
+    public function has(string|int $path, string $separator = '.'): bool
+    {
+        return $this->lookup($path, $separator)[0];
+    }
+
+    /**
+     * Keeps only the given keys of {@see array()}, in their original order. Use it to accept only the fields
+     * you expect, so users cannot slip in extra ones such as "is_admin".
+     *
+     * @throws CastException when the value cannot be converted to an array
+     *
+     * @return array<mixed>
+     */
+    public function only(string|int ...$keys): array
+    {
+        return array_intersect_key($this->array(), array_flip($keys));
+    }
+
+    /**
+     * Removes the given keys from {@see array()}.
+     *
+     * @throws CastException when the value cannot be converted to an array
+     *
+     * @return array<mixed>
+     */
+    public function except(string|int ...$keys): array
+    {
+        return array_diff_key($this->array(), array_flip($keys));
+    }
+
+    /**
+     * Casts every element of {@see array()} with {@see int()}, preserving keys. Single values and null work
+     * too, so `x($_GET['ids'] ?? null)->ints()` handles "5", ["5", "6"] and a missing parameter alike.
+     *
+     * @throws CastException when the value is not an array or any element cannot be converted
+     *
+     * @return array<int>
+     */
+    public function ints(): array
+    {
+        return $this->map(static fn(self $item): int => $item->int());
+    }
+
+    /**
+     * @return array<int>|null
+     */
+    public function tryInts(): ?array
+    {
+        return $this->orNull($this->ints(...));
+    }
+
+    /**
+     * Casts every element with {@see float()}, preserving keys.
+     *
+     * @throws CastException when the value is not an array or any element cannot be converted
+     *
+     * @return array<float>
+     */
+    public function floats(): array
+    {
+        return $this->map(static fn(self $item): float => $item->float());
+    }
+
+    /**
+     * @return array<float>|null
+     */
+    public function tryFloats(): ?array
+    {
+        return $this->orNull($this->floats(...));
+    }
+
+    /**
+     * Casts every element with {@see string()}, preserving keys.
+     *
+     * @throws CastException when the value is not an array or any element cannot be converted
+     *
+     * @return array<string>
+     */
+    public function strings(): array
+    {
+        return $this->map(static fn(self $item): string => $item->string());
+    }
+
+    /**
+     * @return array<string>|null
+     */
+    public function tryStrings(): ?array
+    {
+        return $this->orNull($this->strings(...));
+    }
+
+    /**
+     * Casts every element with {@see bool()}, preserving keys.
+     *
+     * @throws CastException when the value cannot be converted to an array
+     *
+     * @return array<bool>
+     */
+    public function bools(): array
+    {
+        return $this->map(static fn(self $item): bool => $item->bool());
+    }
+
+    /**
+     * Casts every element with {@see enum()}, preserving keys.
+     *
+     * @template T of \UnitEnum
+     *
+     * @param class-string<T> $enum
+     *
+     * @throws CastException when the value is not an array or any element has no matching case
+     *
+     * @return array<T>
+     */
+    public function enums(string $enum): array
+    {
+        return $this->map(static fn(self $item): \UnitEnum => $item->enum($enum));
+    }
+
+    /**
+     * @template T of \UnitEnum
+     *
+     * @param class-string<T> $enum
+     *
+     * @return array<T>|null
+     */
+    public function tryEnums(string $enum): ?array
+    {
+        return $this->orNull(fn(): array => $this->enums($enum));
+    }
+
+    /**
+     * Flattens nested arrays into a list. $depth limits how many levels are flattened; null flattens all.
+     * Objects are kept as they are.
+     *
+     * @throws CastException when the value cannot be converted to an array, or it is nested more than
+     *                       512 levels or refers to itself
+     *
+     * @return list<mixed>
+     */
+    public function flatten(?int $depth = null): array
+    {
+        $result = [];
+        self::flattenInto($this->array(), $depth ?? self::MAX_DEPTH, 1, $result);
+
+        return $result;
+    }
+
+    /**
+     * Flattens nested arrays into one level with joined keys: ['a' => ['b' => 1]] → ['a.b' => 1].
+     * Empty nested arrays are kept as values.
+     *
+     * @throws CastException when the value cannot be converted to an array, or it is nested more than
+     *                       512 levels or refers to itself
+     *
+     * @return array<mixed>
+     */
+    public function dot(string $separator = '.'): array
+    {
+        $result = [];
+        self::dotInto($this->array(), null, $separator, 1, $result);
+
+        return $result;
+    }
+
+    /**
+     * How deeply arrays are nested: 0 for anything that is not an array, 1 for a flat array, 2 for an array
+     * of arrays, and so on. Counting stops at 513, which is also what a self-referencing array returns.
+     * Useful to reject input that is nested suspiciously deep.
+     */
+    public function depth(): int
+    {
+        return \is_array($this->value) ? self::arrayDepth($this->value, 1) : 0;
+    }
+
+    /**
+     * The number of elements of an array or Countable object, or null for anything else.
+     */
+    public function count(): ?int
+    {
+        $value = $this->value;
+
+        if (\is_array($value)) {
+            return \count($value);
+        }
+
+        if ($value instanceof \Countable) {
+            try {
+                return $value->count();
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    // ------------------------------------------------------------------
+    // CSV
+    // ------------------------------------------------------------------
+
+    /**
+     * Escapes a single CSV field: quoted when it contains the delimiter, the enclosure, a line break or
+     * surrounding spaces, with embedded enclosures doubled.
+     *
+     * With $formulaSafe (the default), text starting with =, +, -, @, tab or carriage return is prefixed with
+     * a single quote, so spreadsheet programs show it instead of running it as a formula (CSV injection).
+     * Ints and floats are never prefixed, so negative numbers stay numbers.
+     *
+     * @throws CastException when the value cannot be converted to a string
+     * @throws EscapeException when the delimiter or enclosure is not a single, distinct, non-newline byte
+     */
+    public function csvField(string $delimiter = ',', string $enclosure = '"', bool $formulaSafe = true): string
+    {
+        self::assertCsvControls($delimiter, $enclosure);
+
+        $text = $this->castString();
+
+        if ($formulaSafe && !\is_int($this->value) && !\is_float($this->value) && $text !== '' && str_contains(self::CSV_FORMULA_TRIGGERS, $text[0])) {
+            $text = "'" . $text;
+        }
+
+        if (strpbrk($text, $delimiter . $enclosure . "\n\r") === false && $text === trim($text, ' ')) {
+            return $text;
+        }
+
+        return $enclosure . str_replace($enclosure, $enclosure . $enclosure, $text) . $enclosure;
+    }
+
+    /**
+     * Builds CSV from {@see array()}: a list of rows (each an array of fields), or a single row of fields.
+     * Every field is escaped with {@see csvField()}, and every row ends with $eol.
+     *
+     * @throws CastException when the value cannot be converted to an array, or a field to a string
+     * @throws EscapeException when the delimiter or enclosure is not a single, distinct, non-newline byte
+     */
+    public function csv(string $delimiter = ',', string $enclosure = '"', string $eol = "\n", bool $formulaSafe = true): string
+    {
+        self::assertCsvControls($delimiter, $enclosure);
+
+        $rows = $this->array();
+
+        if (!array_all($rows, static fn(mixed $row): bool => \is_array($row))) {
+            $rows = [$rows];
+        }
+
+        $csv = '';
+
+        foreach ($rows as $row) {
+            $fields = array_map(static fn(mixed $field): string => new self($field)->csvField($delimiter, $enclosure, $formulaSafe), \is_array($row) ? $row : [$row]);
+            $csv .= implode($delimiter, $fields) . $eol;
+        }
+
+        return $csv;
     }
 
     // ------------------------------------------------------------------
@@ -384,6 +836,49 @@ final readonly class Xcapher
     public function css(): string
     {
         return self::replace('/[^a-z0-9]/iu', $this->utf8(), static fn(string $char): string => \sprintf('\%X ', mb_ord($char, 'UTF-8')));
+    }
+
+    /**
+     * Builds an HTML attribute string from {@see array()}, with every value escaped:
+     * ['class' => ['btn', 'active'], 'disabled' => true, 'hidden' => false, 'data-id' => 5, 'required']
+     * → 'class="btn active" disabled data-id="5" required'.
+     *
+     * - true renders the bare attribute; false and null leave it out.
+     * - A list becomes space-separated tokens, and a map of booleans the keys that are true
+     *   (['btn' => true, 'active' => false] → "btn"). Any other array is encoded as JSON.
+     * - A value without a key ('required') renders as a bare attribute.
+     *
+     * Attribute names are validated but not filtered: never take them from user input, since names such as
+     * "onclick" run JavaScript.
+     *
+     * @throws CastException when a value cannot be converted to a string
+     * @throws EscapeException when an attribute name is not valid HTML
+     */
+    public function htmlAttributes(): string
+    {
+        $attributes = [];
+
+        foreach ($this->array() as $name => $value) {
+            if (\is_int($name)) {
+                if ($value === null || $value === false) {
+                    continue;
+                }
+
+                [$name, $value] = [new self($value)->castString(), true];
+            }
+
+            if (preg_match('/^[^\s"\'>\/=\x00-\x1F\x7F]+$/Du', $name) !== 1) {
+                throw new EscapeException('Invalid HTML attribute name; names cannot be empty or contain spaces, quotes, ">", "/", "=" or control characters.');
+            }
+
+            if ($value === null || $value === false) {
+                continue;
+            }
+
+            $attributes[] = $value === true ? $name : $name . '="' . new self(\is_array($value) ? self::attributeTokens($value) : $value)->html() . '"';
+        }
+
+        return implode(' ', $attributes);
     }
 
     // ------------------------------------------------------------------
@@ -733,11 +1228,17 @@ final readonly class Xcapher
         return strip_tags($this->castString(), $allowedTags);
     }
 
+    /**
+     * @throws CastException when the value cannot be converted to a string
+     */
     public function lower(): string
     {
         return mb_strtolower($this->utf8(), 'UTF-8');
     }
 
+    /**
+     * @throws CastException when the value cannot be converted to a string
+     */
     public function upper(): string
     {
         return mb_strtoupper($this->utf8(), 'UTF-8');
@@ -839,7 +1340,8 @@ final readonly class Xcapher
         $dot = strrpos($name, '.');
         $extension = $dot !== false && \strlen($name) - $dot <= 16 ? substr($name, $dot) : '';
 
-        return mb_strcut($name, 0, 255 - \strlen($extension), 'UTF-8') . $extension;
+        // Truncation can expose a trailing space or dot, which Windows does not allow at the end of a name.
+        return rtrim(mb_strcut($name, 0, 255 - \strlen($extension), 'UTF-8') . $extension, ' .');
     }
 
     // ------------------------------------------------------------------
@@ -912,6 +1414,121 @@ final readonly class Xcapher
     }
 
     /**
+     * True when the value is an instance of any of the given classes or interfaces (extends or implements).
+     */
+    public function isInstanceOf(string ...$classes): bool
+    {
+        foreach ($classes as $class) {
+            if ($this->value instanceof $class) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * True when the value is an enum case, of the given enum when one is passed.
+     */
+    public function isEnum(?string $enum = null): bool
+    {
+        return $this->value instanceof \UnitEnum && ($enum === null || $this->value instanceof $enum);
+    }
+
+    /**
+     * True when {@see enum()} would find a case of the given enum.
+     */
+    public function isEnumValue(string $enum): bool
+    {
+        try {
+            return $this->findEnumCase($enum) !== null;
+        } catch (CastException) {
+            return false;
+        }
+    }
+
+    /**
+     * True when {@see oneOf()} would find the value in the allowlist.
+     *
+     * @param array<mixed> $allowed
+     */
+    public function isOneOf(array $allowed): bool
+    {
+        return $this->findAllowed($allowed)[0];
+    }
+
+    /**
+     * True for an array with at least one non-sequential key (an array that is not a list).
+     */
+    public function isAssoc(): bool
+    {
+        return \is_array($this->value) && !array_is_list($this->value);
+    }
+
+    /**
+     * True when every key exists (in an array, ArrayAccess object or as a public property), even if null.
+     * Plain keys only; use {@see has()} for dot-separated paths.
+     */
+    public function hasKeys(string|int ...$keys): bool
+    {
+        foreach ($keys as $key) {
+            if (!self::child($this->value, $key)[0]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * True when the value is an array or Traversable and the test returns true for every element.
+     * An empty array passes, so combine it with {@see isEmpty()} when at least one element is required.
+     * Anything else returns false.
+     *
+     * @param callable(self, array-key): bool $test
+     */
+    public function every(callable $test): bool
+    {
+        $items = $this->iterableItems();
+
+        if ($items === null) {
+            return false;
+        }
+
+        foreach ($items as $key => $item) {
+            if ($test(new self($item), $key) !== true) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * True when the value is an array or Traversable and the test returns true for at least one element.
+     *
+     * @param callable(self, array-key): bool $test
+     */
+    public function some(callable $test): bool
+    {
+        foreach ($this->iterableItems() ?? [] as $key => $item) {
+            if ($test(new self($item), $key) === true) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * True for an open stream resource (from fopen(), tmpfile(), ...).
+     */
+    public function isStream(): bool
+    {
+        return \is_resource($this->value) && get_resource_type($this->value) === 'stream';
+    }
+
+    /**
      * True when {@see string()} would succeed.
      */
     public function isStringable(): bool
@@ -932,15 +1549,7 @@ final readonly class Xcapher
      */
     public function isInteger(): bool
     {
-        if (\is_int($this->value)) {
-            return true;
-        }
-
-        $text = $this->text();
-
-        return $text !== null
-            && preg_match('/^[+-]?[0-9]+$/D', $text) === 1
-            && \is_int(self::parseNumber($text));
+        return \is_int($this->value) || self::integerFromText($this->text()) !== null;
     }
 
     /**
@@ -971,9 +1580,9 @@ final readonly class Xcapher
     /**
      * Validates an absolute URL with the WHATWG URL parser (so internationalized domains are accepted)
      * and rejects any input that needs error correction. Only http and https are allowed by default;
-     * pass other schemes, or [] for any scheme.
+     * pass other schemes (case-insensitive; non-string entries are ignored), or [] for any scheme.
      *
-     * @param list<string> $schemes
+     * @param array<mixed> $schemes
      */
     public function isUrl(array $schemes = ['http', 'https']): bool
     {
@@ -990,7 +1599,17 @@ final readonly class Xcapher
             return false;
         }
 
-        return $schemes === [] || \in_array($url->getScheme(), array_map(strtolower(...), $schemes), true);
+        if ($schemes === []) {
+            return true;
+        }
+
+        foreach ($schemes as $scheme) {
+            if (\is_string($scheme) && strtolower($scheme) === $url->getScheme()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function isIp(): bool
@@ -1217,6 +1836,352 @@ final readonly class Xcapher
     }
 
     /**
+     * @template T of \UnitEnum
+     *
+     * @param class-string<T> $enum
+     *
+     * @return T
+     */
+    private function castEnum(string $enum): \UnitEnum
+    {
+        $case = $this->findEnumCase($enum);
+
+        return $case instanceof $enum ? $case : throw CastException::create($this->value, $enum, 'no matching case');
+    }
+
+    /**
+     * @throws CastException when $enum is not an enum
+     */
+    private function findEnumCase(string $enum): ?\UnitEnum
+    {
+        if (!self::isEnumClass($enum)) {
+            throw new CastException(\sprintf('%s is not an enum.', $enum));
+        }
+
+        if ($this->value instanceof $enum) {
+            return $this->value;
+        }
+
+        $text = $this->text();
+        $integer = self::integerFromText($text);
+
+        foreach (new \ReflectionEnum($enum)->getCases() as $reflection) {
+            $case = $reflection->getValue();
+            $matches = match (true) {
+                !$case instanceof \BackedEnum => $case->name === $text,
+                \is_int($case->value) => $case->value === $integer,
+                default => $case->value === $text,
+            };
+
+            if ($matches) {
+                return $case;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @template T of object
+     *
+     * @param class-string<T> $class
+     *
+     * @return T
+     */
+    private function castInstance(string $class): object
+    {
+        $value = $this->value;
+
+        return $value instanceof $class ? $value : throw CastException::create($value, $class);
+    }
+
+    private function castDate(?string $format): \DateTimeImmutable
+    {
+        $value = $this->value;
+
+        if ($value instanceof \DateTimeImmutable) {
+            return $value;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return \DateTimeImmutable::createFromInterface($value);
+        }
+
+        try {
+            $date = match (true) {
+                \is_int($value) => new \DateTimeImmutable('@' . $value),
+                \is_float($value) && is_finite($value) => \DateTimeImmutable::createFromFormat('U.u', \sprintf('%.6F', $value)),
+                default => self::parseDate($this->text(), $format),
+            };
+        } catch (\Throwable $e) {
+            throw CastException::create($value, 'date', $e->getMessage());
+        }
+
+        if (!$date instanceof \DateTimeImmutable) {
+            throw CastException::create($value, 'date');
+        }
+
+        // Timestamps are parsed as UTC; show them in the default time zone like every other date.
+        return \is_int($value) || \is_float($value) ? $date->setTimezone(new \DateTimeZone(date_default_timezone_get())) : $date;
+    }
+
+    /**
+     * @param array<mixed> $allowed
+     */
+    private function castOneOf(array $allowed): mixed
+    {
+        [$found, $match] = $this->findAllowed($allowed);
+
+        return $found ? $match : throw CastException::create($this->value, 'an allowed value', 'not in the allowlist');
+    }
+
+    /**
+     * @param array<mixed> $allowed
+     *
+     * @return array{bool, mixed}
+     */
+    private function findAllowed(array $allowed): array
+    {
+        $value = $this->value;
+
+        foreach ($allowed as $candidate) {
+            if ($candidate === $value) {
+                return [true, $candidate];
+            }
+        }
+
+        if (\is_int($value) || \is_string($value)) {
+            foreach ($allowed as $candidate) {
+                if ((\is_int($candidate) || \is_string($candidate)) && (string) $candidate === (string) $value) {
+                    return [true, $candidate];
+                }
+            }
+        }
+
+        return [false, null];
+    }
+
+    private function castClosure(): \Closure
+    {
+        $value = $this->value;
+
+        if ($value instanceof \Closure) {
+            return $value;
+        }
+
+        if (!\is_callable($value)) {
+            throw CastException::create($value, 'Closure', 'the value is not callable');
+        }
+
+        try {
+            return \Closure::fromCallable($value);
+        } catch (\Throwable $e) {
+            throw CastException::create($value, 'Closure', $e->getMessage());
+        }
+    }
+
+    /**
+     * @return array<mixed>
+     */
+    private function castDeepArray(): array
+    {
+        $seen = new \SplObjectStorage();
+
+        if (\is_object($this->value)) {
+            $seen->offsetSet($this->value);
+        }
+
+        return self::deepArray($this->castArray(), 1, $seen);
+    }
+
+    /**
+     * Finds a key, then a dot-separated path.
+     *
+     * @return array{bool, mixed}
+     */
+    private function lookup(string|int $path, string $separator): array
+    {
+        $direct = self::child($this->value, $path);
+
+        if ($direct[0] || \is_int($path) || $separator === '' || !str_contains($path, $separator)) {
+            return $direct;
+        }
+
+        $current = $this->value;
+
+        foreach (explode($separator, $path) as $segment) {
+            [$found, $current] = self::child($current, $segment);
+
+            if (!$found) {
+                return [false, null];
+            }
+        }
+
+        return [true, $current];
+    }
+
+    /**
+     * The elements of an array or Traversable, or null for anything else.
+     *
+     * @return array<mixed>|null
+     */
+    private function iterableItems(): ?array
+    {
+        return \is_array($this->value) || $this->value instanceof \Traversable ? $this->tryArray() : null;
+    }
+
+    /**
+     * Reads one key from an array, ArrayAccess object or public object property.
+     *
+     * @return array{bool, mixed}
+     */
+    private static function child(mixed $container, string|int $key): array
+    {
+        if (\is_array($container)) {
+            return \array_key_exists($key, $container) ? [true, $container[$key]] : [false, null];
+        }
+
+        if ($container instanceof \ArrayAccess) {
+            try {
+                return $container->offsetExists($key) ? [true, $container->offsetGet($key)] : [false, null];
+            } catch (\Throwable) {
+                return [false, null];
+            }
+        }
+
+        if (\is_object($container)) {
+            $properties = get_object_vars($container);
+
+            return \array_key_exists($key, $properties) ? [true, $properties[$key]] : [false, null];
+        }
+
+        return [false, null];
+    }
+
+    /**
+     * Converts nested objects to arrays, building new arrays so the input (and any references in it) is never modified.
+     *
+     * @param array<mixed> $array
+     * @param \SplObjectStorage<object, mixed> $seen objects on the current path, to detect cycles
+     *
+     * @return array<mixed>
+     */
+    private static function deepArray(array $array, int $level, \SplObjectStorage $seen): array
+    {
+        if ($level > self::MAX_DEPTH) {
+            throw new CastException(\sprintf('Cannot convert value to array: nested more than %d levels deep, or it refers to itself.', self::MAX_DEPTH));
+        }
+
+        $result = [];
+
+        foreach ($array as $key => $item) {
+            if (\is_array($item)) {
+                $item = self::deepArray($item, $level + 1, $seen);
+            } elseif (\is_object($item) && !$item instanceof \UnitEnum && !$item instanceof \DateTimeInterface && !$item instanceof \Closure) {
+                if ($seen->offsetExists($item)) {
+                    throw new CastException('Cannot convert value to array: the object refers to itself.');
+                }
+
+                $object = $item;
+                $seen->offsetSet($object);
+                $item = self::deepArray(new self($object)->castArray(), $level + 1, $seen);
+                $seen->offsetUnset($object);
+            }
+
+            $result[$key] = $item;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<mixed> $array
+     * @param list<mixed> $result
+     */
+    private static function flattenInto(array $array, int $depth, int $level, array &$result): void
+    {
+        if ($level > self::MAX_DEPTH) {
+            throw new CastException(\sprintf('Cannot flatten: nested more than %d levels deep, or it refers to itself.', self::MAX_DEPTH));
+        }
+
+        foreach ($array as $item) {
+            if (\is_array($item) && $depth > 0) {
+                self::flattenInto($item, $depth - 1, $level + 1, $result);
+            } else {
+                $result[] = $item;
+            }
+        }
+    }
+
+    /**
+     * @param array<mixed> $array
+     * @param array<mixed> $result
+     */
+    private static function dotInto(array $array, ?string $prefix, string $separator, int $level, array &$result): void
+    {
+        if ($level > self::MAX_DEPTH) {
+            throw new CastException(\sprintf('Cannot flatten: nested more than %d levels deep, or it refers to itself.', self::MAX_DEPTH));
+        }
+
+        foreach ($array as $key => $item) {
+            $name = $prefix === null ? (string) $key : $prefix . $separator . $key;
+
+            if (\is_array($item) && $item !== []) {
+                self::dotInto($item, $name, $separator, $level + 1, $result);
+            } else {
+                $result[$name] = $item;
+            }
+        }
+    }
+
+    /**
+     * @param array<mixed> $array
+     */
+    private static function arrayDepth(array $array, int $level): int
+    {
+        $deepest = $level;
+
+        foreach ($array as $item) {
+            if (\is_array($item)) {
+                $deepest = max($deepest, $level >= self::MAX_DEPTH ? $level + 1 : self::arrayDepth($item, $level + 1));
+
+                if ($deepest > self::MAX_DEPTH) {
+                    break;
+                }
+            }
+        }
+
+        return $deepest;
+    }
+
+    /**
+     * Turns an attribute value array into tokens (a list, or the true keys of a map of booleans), or JSON.
+     *
+     * @param array<mixed> $value
+     */
+    private static function attributeTokens(array $value): string
+    {
+        if ($value !== [] && !array_is_list($value) && array_all($value, static fn(mixed $enabled): bool => \is_bool($enabled))) {
+            return implode(' ', array_keys($value, true, true));
+        }
+
+        if (array_is_list($value) && array_all($value, static fn(mixed $token): bool => $token === null || \is_scalar($token) || $token instanceof \Stringable)) {
+            $tokens = array_map(static fn(mixed $token): string => new self($token)->castString(), $value);
+
+            return implode(' ', array_filter($tokens, static fn(string $token): bool => $token !== ''));
+        }
+
+        return new self($value)->json();
+    }
+
+    private static function assertCsvControls(string $delimiter, string $enclosure): void
+    {
+        if (\strlen($delimiter) !== 1 || \strlen($enclosure) !== 1 || $delimiter === $enclosure || str_contains("\r\n", $delimiter) || str_contains("\r\n", $enclosure)) {
+            throw new EscapeException('The CSV delimiter and enclosure must be two different single bytes, neither a line break.');
+        }
+    }
+
+    /**
      * Converts to a string with any invalid UTF-8 sequence replaced by U+FFFD.
      */
     private function utf8(): string
@@ -1314,6 +2279,51 @@ final readonly class Xcapher
         }
 
         return 0;
+    }
+
+    /**
+     * The int a whole-number string ("42", "-7", "+3", "007") holds, or null when it is not one or is out of range.
+     */
+    private static function integerFromText(?string $text): ?int
+    {
+        if ($text === null || preg_match('/^[+-]?[0-9]+$/D', $text) !== 1) {
+            return null;
+        }
+
+        $number = self::parseNumber($text);
+
+        return \is_int($number) ? $number : null;
+    }
+
+    /**
+     * Parses a date string strictly: empty strings, NUL bytes and dates PHP would roll over are rejected.
+     */
+    private static function parseDate(?string $text, ?string $format): ?\DateTimeImmutable
+    {
+        if ($text === null || trim($text) === '' || str_contains($text, "\0") || str_contains((string) $format, "\0")) {
+            return null;
+        }
+
+        $date = $format === null ? new \DateTimeImmutable($text) : \DateTimeImmutable::createFromFormat('!' . $format, $text);
+        $errors = \DateTimeImmutable::getLastErrors();
+
+        if ($date === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+            return null;
+        }
+
+        return $date;
+    }
+
+    /**
+     * @phpstan-assert-if-true class-string<\UnitEnum> $class
+     */
+    private static function isEnumClass(string $class): bool
+    {
+        try {
+            return enum_exists($class);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private static function parseBool(string $text): bool

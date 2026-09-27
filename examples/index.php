@@ -14,6 +14,12 @@ use function Xcapher\x;
 
 require __DIR__ . '/../vendor/autoload.php';
 
+enum Status: string
+{
+    case Active = 'active';
+    case Banned = 'banned';
+}
+
 /**
  * Each example is the code shown on the page and a closure that runs exactly that code.
  *
@@ -42,6 +48,26 @@ $sections = [
         ["x(['q' => 'blå bær', 'page' => 2])->query()", static fn(): string => x(['q' => 'blå bær', 'page' => 2])->query()],
         ["x(['url' => 'https://x.no/', 'n' => 1.0])->json()", static fn(): string => x(['url' => 'https://x.no/', 'n' => 1.0])->json()],
         ["x('hi??>>')->base64UrlEncode()", static fn(): string => x('hi??>>')->base64UrlEncode()],
+    ]],
+    'objects' => ['Enums, objects & allowlists', [
+        ["x('banned')->enum(Status::class)", static fn(): Status => x('banned')->enum(Status::class)],
+        ["x('hacker')->enum(Status::class, Status::Active)", static fn(): Status => x('hacker')->enum(Status::class, Status::Active)],
+        ["x('id; DROP TABLE users')->oneOf(['id', 'name'], 'id')", static fn(): string => x('id; DROP TABLE users')->oneOf(['id', 'name'], 'id')],
+        ["x('5')->oneOf([10, 20, 5])", static fn(): int => x('5')->oneOf([10, 20, 5])],
+        ["x('29.02.2024')->date('d.m.Y')", static fn(): DateTimeImmutable => x('29.02.2024')->date('d.m.Y')],
+        ["x('2023-02-30')->tryDate()", static fn(): ?DateTimeImmutable => x('2023-02-30')->tryDate()],
+        ['x(new ArrayObject())->isInstanceOf(Countable::class)', static fn(): bool => x(new ArrayObject())->isInstanceOf(Countable::class)],
+        ["x(fopen('php://memory', 'r'))->debugType()", static fn(): string => x(fopen('php://memory', 'r'))->debugType()],
+    ]],
+    'arrays' => ['Arrays & CSV', [
+        ["x(['user' => ['age' => '42']])->get('user.age')->int()", static fn(): int => x(['user' => ['age' => '42']])->get('user.age')->int()],
+        ["x(['user' => []])->get('user.email', 'none')->string()", static fn(): string => x(['user' => []])->get('user.email', 'none')->string()],
+        ["x(['name' => 'Eve', 'is_admin' => 1])->only('name', 'email')", static fn(): array => x(['name' => 'Eve', 'is_admin' => 1])->only('name', 'email')],
+        ["x(['1', '2', '3x'])->ints()", static fn(): array => x(['1', '2', '3x'])->ints()],
+        ["x(['a' => ['b' => [1, 2]]])->dot()", static fn(): array => x(['a' => ['b' => [1, 2]]])->dot()],
+        ['x([1, [2, [3, [4]]]])->depth()', static fn(): int => x([1, [2, [3, [4]]]])->depth()],
+        ["x(['class' => ['btn', 'active'], 'disabled' => true])->htmlAttributes()", static fn(): string => x(['class' => ['btn', 'active'], 'disabled' => true])->htmlAttributes()],
+        ["x(['Eve', '=HYPERLINK(\"http://evil\")'])->csv()", static fn(): string => x(['Eve', '=HYPERLINK("http://evil")'])->csv()],
     ]],
     'sql' => ['SQL & Shell', [
         ["x('order')->identifier(Database::MySql)", static fn(): string => x('order')->identifier(Database::MySql)],
@@ -114,6 +140,8 @@ function outcome(Closure $run): array
         $value === true => ['kind' => 'true', 'text' => 'true'],
         $value === false => ['kind' => 'false', 'text' => 'false'],
         $value === null => ['kind' => 'null', 'text' => 'null'],
+        $value instanceof UnitEnum => ['kind' => 'value', 'text' => $value::class . '::' . $value->name],
+        $value instanceof DateTimeInterface => ['kind' => 'value', 'text' => $value->format('Y-m-d H:i:s P')],
         is_string($value) => ['kind' => 'value', 'text' => "'" . $value . "'"],
         is_array($value) => ['kind' => 'value', 'text' => x($value)->json()],
         default => ['kind' => 'value', 'text' => var_export($value, true)],

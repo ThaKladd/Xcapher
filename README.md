@@ -30,9 +30,12 @@ closed resources and generators that throw.
 - [Usage](#usage)
 - [Features](#features)
   - [Casting](#casting)
+  - [Enums, objects, dates and allowlists](#enums-objects-dates-and-allowlists)
   - [HTML, XML, JavaScript and CSS](#html-xml-javascript-and-css)
   - [URLs, JSON and Base64](#urls-json-and-base64)
   - [SQL](#sql)
+  - [Arrays](#arrays)
+  - [CSV](#csv)
   - [Shell and regular expressions](#shell-and-regular-expressions)
   - [Sanitizing](#sanitizing)
   - [Validation](#validation)
@@ -83,7 +86,7 @@ original value and `type()` returns its [`Type`](#types).
 | `int(?int $default = null)` | `int` | Parses the numeric prefix (`"12test"` → 12, `"abc"` → 0, `"1e3"` → 1000). Floats truncate towards zero and clamp to `PHP_INT_MIN`/`PHP_INT_MAX`. Arrays → 0/1, dates → timestamp. |
 | `float(?float $default = null)` | `float` | Same rules as `int()` without truncation; dates keep microseconds. |
 | `bool()` | `bool` | Reads strings semantically: `"1"`, `"true"`, `"on"`, `"yes"` → `true`; `"0"`, `"false"`, `"off"`, `"no"`, `""` → `false`. Case-insensitive and ignores surrounding whitespace; everything else follows PHP truthiness. Never throws. |
-| `array(?array $default = null)` | `array` | `null` → `[]`, `Traversable` → `iterator_to_array()` (keys kept), objects → public properties, scalars → `[$value]`. |
+| `array(?array $default = null, bool $deep = false)` | `array` | `null` → `[]`, `Traversable` → `iterator_to_array()` (keys kept), objects → public properties, scalars → `[$value]`. With `deep: true`, nested objects are converted too; self-references and nesting beyond 512 levels throw. |
 | `list()` | `list` | `array()` re-indexed. |
 | `object()` | `object` | Arrays → `stdClass`, `null` → empty `stdClass`, scalars → `stdClass{scalar}`. Never throws. |
 | `to(Type $type)` | `mixed` | Generic form of the methods above. |
@@ -105,6 +108,36 @@ x('off')->bool();                       // false (PHP's (bool) "off" would be tr
 x(['a' => '1', 'b' => 'x'])->map(fn ($v) => $v->int()); // ['a' => 1, 'b' => 0]
 ```
 
+### Enums, objects, dates and allowlists
+
+These methods turn untrusted input into trusted, typed values. Like the casts above, each takes an optional
+default and has a `try*()` variant that returns `null`.
+
+| Method | Returns | Notes |
+| --- | --- | --- |
+| `enum(string $enum, $default = null)` | the enum case | Backed enums match on their value: int-backed enums accept ints and whole-number strings (`"10"`), and string-backed enums accept strings, ints and `Stringable` objects. Pure enums match on the exact case name. |
+| `instanceOf(string $class, $default = null)` | the object | Returns the value when it is an instance of the class or interface. Static analysis then knows the exact type. |
+| `date(?string $format = null, $default = null)` | `DateTimeImmutable` | Accepts dates, Unix timestamps (int or float, in the default time zone), and strings in the given format or anything PHP's date parser accepts (including "tomorrow"). Impossible dates such as `2023-02-30` are rejected instead of rolling over. |
+| `oneOf(array $allowed, $default = null)` | the allowed element | Allowlist matching. Comparison is strict, except that ints and strings with the same form match (`"5"` matches `5`). The element from the list is returned, never the raw input. |
+| `closure($default = null)` | `Closure` | Converts any callable: `'strlen'`, `[$object, 'method']`, `'Class::staticMethod'` or an invokable object. **Only use this on trusted values**, because it lets the value decide which function runs. |
+
+```php
+enum Status: string { case Active = 'active'; case Banned = 'banned'; }
+
+x($_GET['status'] ?? null)->enum(Status::class, Status::Active); // Status::Active unless a valid value was sent
+x('banned')->tryEnum(Status::class);                             // Status::Banned
+
+// Never put raw input in ORDER BY: allowlist it instead
+$column = x($_GET['sort'] ?? null)->oneOf(['name', 'created_at'], 'name');
+$dir    = x($_GET['dir'] ?? null)->oneOf(['asc', 'desc'], 'asc');
+$pdo->query("SELECT * FROM users ORDER BY {$column} {$dir}");
+
+x($container->get('logger'))->instanceOf(LoggerInterface::class); // LoggerInterface, or a CastException
+x('29.02.2024')->date('d.m.Y');                                  // DateTimeImmutable 2024-02-29 00:00
+x(1700000000)->date();                                           // from a Unix timestamp
+x('2023-02-30')->tryDate();                                      // null
+```
+
 ### HTML, XML, JavaScript and CSS
 
 Choose the method for the context the output will land in. These methods convert their input with
@@ -120,6 +153,7 @@ Choose the method for the context the output will land in. These methods convert
 | `js()` | Inside a quoted JavaScript string | `</script>` → `\x3C\x2Fscript\x3E` |
 | `jsValue()` | A value embedded as a JS/JSON literal in `<script>` or an attribute | `['a' => '</b>']` → `{"a":"\u003C/b\u003E"}` |
 | `css()` | CSS strings and identifiers | `a b;` → `a\20 b\3B ` |
+| `htmlAttributes()` | A whole attribute string from an array (see below) | `['class' => ['btn', 'active'], 'disabled' => true]` → `class="btn active" disabled` |
 
 ```php
 <p title="<?= x($title)->html() ?>"><?= x($body)->html() ?></p>
@@ -128,6 +162,21 @@ Choose the method for the context the output will land in. These methods convert
     const user = <?= x($user)->jsValue() ?>;
     const name = '<?= x($name)->js() ?>';
 </script>
+```
+
+`htmlAttributes()` renders `true` as a bare attribute and leaves out `false` and `null`. A list becomes
+space-separated tokens, a map of booleans becomes the keys that are `true` (handy for conditional classes), any
+other array becomes JSON, and a value without a key (`'required'`) becomes a bare attribute. Values are always
+escaped, and invalid attribute names throw. Names are not filtered, so never take them from user input:
+`onclick` is a valid name.
+
+```php
+<button <?= x([
+    'type' => 'submit',
+    'class' => ['btn' => true, 'btn-active' => $active],
+    'disabled' => !$enabled,
+    'data-config' => ['id' => 5, 'tags' => ['a', 'b']],
+])->htmlAttributes() ?>>Save</button>
 ```
 
 ### URLs, JSON and Base64
@@ -149,6 +198,10 @@ identifier, a `LIKE` pattern or a dynamic `ORDER BY`, use these methods. They ac
 `PgSql\Connection` or `PDO` (MySQL, PostgreSQL or SQLite) connection, and some also accept an
 `Xcapher\Database` value.
 
+> **Set the connection charset the proper way.** Escaping is only correct when the driver knows the
+> connection's character set. Use `$mysqli->set_charset('utf8mb4')` or `charset=utf8mb4` in the PDO DSN, never a
+> `SET NAMES` query. Otherwise multibyte charsets such as GBK can be abused to break out of an escaped string.
+
 | Method | Description |
 | --- | --- |
 | `escape($connection)` | Escapes with the connection's own escaping, for use inside `'…'`. Needs a live connection. |
@@ -169,6 +222,49 @@ $pdo->prepare($sql)->execute([x($search)->like() . '%']);
 x(null)->quote($pdo);                 // NULL
 x(true)->quote(Database::PostgreSql); // TRUE
 x('public.users')->identifier(Database::PostgreSql, qualified: true); // "public"."users"
+```
+
+### Arrays
+
+| Method | Description |
+| --- | --- |
+| `get(string\|int $path, mixed $default = null, string $separator = '.')` | The value at a key or dot path, wrapped in a new `Xcapher`, so it chains with every other method. A missing path gives the wrapped `$default`, never a warning. Pass defaults here rather than to the cast: `get('name', 'none')->string()`, because a missing path is `null` and `null` casts to `''` without needing the cast's default. Walks arrays, `ArrayAccess` objects and public properties. |
+| `has(string\|int $path, string $separator = '.')` | The key or path exists, even if its value is `null`. |
+| `only(...$keys)` / `except(...$keys)` | Keep or drop keys. `only()` is the array version of an allowlist and stops users from adding fields you didn't expect (mass assignment). |
+| `ints()`, `floats()`, `strings()`, `bools()`, `enums($enum)` | Cast every element, keeping keys. A single value or `null` works too, so `x($_GET['ids'] ?? null)->ints()` handles `5`, `[5, 6]` and a missing parameter. They throw if any element fails; the `try*()` variants return `null`. |
+| `flatten(?int $depth = null)` | Nested arrays become one list; `$depth` limits the levels. |
+| `dot(string $separator = '.')` | `['a' => ['b' => 1]]` → `['a.b' => 1]`. |
+| `depth()` | Nesting depth: `0` for non-arrays, `1` for a flat array. Stops counting at 513, including for self-referencing arrays. |
+| `count()` | Element count of an array or `Countable`, otherwise `null`. |
+
+```php
+$input = x($_POST);
+
+$user = $input->only('name', 'email');               // 'is_admin' can't sneak in
+$age  = $input->get('profile.age')->int(0);          // 0 if missing or not a number
+$city = $input->get('address.city', 'Oslo')->string(); // 'Oslo' if missing
+$ok   = $input->get('email')->isEmail();
+
+$ids = x($_GET['ids'] ?? null)->ints();              // list of ints, ready for WHERE id IN (...)
+
+if (x($json)->depth() > 10) { /* reject suspicious input */ }
+```
+
+### CSV
+
+| Method | Description |
+| --- | --- |
+| `csvField(string $delimiter = ',', string $enclosure = '"', bool $formulaSafe = true)` | One field, quoted when needed, with embedded quotes doubled. |
+| `csv(string $delimiter = ',', string $enclosure = '"', string $eol = "\n", bool $formulaSafe = true)` | A list of rows, or a single row, as CSV text. |
+
+Both protect against CSV injection by default. Text starting with `=`, `+`, `-`, `@`, tab or carriage return
+gets a leading `'`, so Excel and other spreadsheet programs show it instead of running it as a formula. Ints and
+floats are never prefixed, so negative numbers stay numbers.
+
+```php
+x([['name', 'note'], ['Eve', '=HYPERLINK("http://evil")']])->csv();
+// name,note
+// Eve,"'=HYPERLINK(""http://evil"")"
 ```
 
 ### Shell and regular expressions
@@ -205,6 +301,14 @@ Validators return a `bool` and never throw. Text validators accept strings, ints
 | `isNull()`, `isBool()`, `isInt()`, `isFloat()`, `isString()`, `isArray()`, `isObject()`, `isResource()` | Native types (closed resources count as resources) |
 | `isScalar()`, `isList()`, `isCallable()`, `isIterable()`, `isCountable()` | Native checks |
 | `isStringable()` | `string()` would succeed |
+| `isInstanceOf(string ...$classes)` | An instance of any of the classes or interfaces (extends or implements) |
+| `isEnum(?string $enum = null)` | A case of the given enum, or of any enum |
+| `isEnumValue(string $enum)` | `enum()` would find a case; use it to validate input |
+| `isOneOf(array $allowed)` | `oneOf()` would find the value |
+| `isAssoc()` | An array that is not a list |
+| `hasKeys(string\|int ...$keys)` | Every key exists (use `has()` for dot paths) |
+| `every(callable $test)` / `some(callable $test)` | An array or `Traversable` where every / at least one element passes: `x($ids)->every(fn ($v) => $v->isInteger())`. An empty array passes `every()`; anything that is not iterable fails both. |
+| `isStream()` | An open stream resource |
 | `isNumeric()` | `42`, `1.5`, `"1e3"`, `" 42 "` |
 | `isInteger()` | Ints, and strings holding a whole number in the int range (`"42"`, `"-7"`, `"007"`) |
 | `isEmpty()` | `null`, `""`, `[]` and empty `Countable` objects, but not `0`, `"0"` or `false` |
@@ -240,6 +344,10 @@ x('a')->is(Type::String, Type::Int);   // true
 x('12')->to(Type::Int);                // 12
 Type::of($anything);                   // never throws
 ```
+
+For messages and logs, `debugType()` gives a readable type (`"int"`, `"App\User"`, `"resource (stream)"`), and
+`resourceType()` gives a resource's type (`"stream"`, or `"Unknown"` once it is closed), or `null` for anything
+that is not a resource.
 
 ## Error handling
 

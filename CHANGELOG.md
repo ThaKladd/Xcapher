@@ -16,9 +16,16 @@ The 1.0 rewrite. See "Upgrading from 0.x" in the README.
 - Escaping: `html()`, `htmlAttr()`, `xml()`, `js()`, `jsValue()`, `css()`, `rawUrlEncode()`/`rawUrlDecode()`,
   `query()`, `json()`/`jsonDecode()`, Base64 and Base64URL, `quote()`, `identifier()`, `like()`,
   `shellArg()` and `regex()`.
+- Enums, objects, dates and allowlists: `enum()`, `instanceOf()`, `date()`, `oneOf()` and `closure()`, each
+  with a `try*()` variant, plus `isEnum()`, `isEnumValue()`, `isInstanceOf()`, `isOneOf()` and `isStream()`.
+- Introspection: `debugType()` and `resourceType()`.
+- Arrays: `get()`/`has()` for dot-path access, `only()`/`except()` key allowlists, typed lists (`ints()`,
+  `floats()`, `strings()`, `bools()`, `enums()`), `flatten()`, `dot()`, `depth()`, `count()`, `array(deep: true)`,
+  and the validators `isAssoc()`, `hasKeys()`, `every()` and `some()`.
+- Escaping: `htmlAttributes()`, plus `csv()` and `csvField()` with CSV-injection protection.
 - Sanitizing: `trim()`, `squish()`, `stripTags()`, `lower()`, `upper()`, `digits()`, `alpha()`, `alnum()`,
   `slug()` and `filename()`.
-- More than 40 validators, including `isEmail()`, `isUrl()` (WHATWG parser), `isIp()`, `isUuid()`,
+- More than 30 validators, including `isEmail()`, `isUrl()` (WHATWG parser), `isIp()`, `isUuid()`,
   `isJson()`, `isDate()` and `matches()`.
 - The `XcapherException` interface, with `CastException` and `EscapeException`.
 - PDO support for SQL escaping.

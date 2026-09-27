@@ -139,6 +139,12 @@ final class SanitizeTest extends TestCase
         self::assertSame($expected, x($value)->filename());
     }
 
+    public function testFilenameNeverEndsInASpaceOrDotAfterTruncation(): void
+    {
+        self::assertSame(str_repeat('a', 254), x(str_repeat('a', 254) . ' ' . str_repeat('b', 30))->filename());
+        self::assertSame(str_repeat('a', 254), x(str_repeat('a', 254) . '.' . str_repeat('b', 30))->filename());
+    }
+
     public function testFilenameLengthBoundaries(): void
     {
         $exact = str_repeat('a', 251) . '.txt';

@@ -92,6 +92,17 @@ final class RobustnessTest extends TestCase
         }];
     }
 
+    /**
+     * Calls a method through reflection with an argument its signature forbids statically (such as a class
+     * that is not an enum), because callers without static analysis can still pass one at runtime.
+     *
+     * @return \Closure(Xcapher): mixed
+     */
+    private static function invalidArgument(string $method, mixed $argument): \Closure
+    {
+        return static fn(Xcapher $x): mixed => new \ReflectionMethod(Xcapher::class, $method)->invoke($x, $argument);
+    }
+
     private static function pairs(): \Generator
     {
         yield 'a' => 1;
@@ -161,6 +172,38 @@ final class RobustnessTest extends TestCase
             'htmlEntityEncode' => [static fn(Xcapher $x): string => $x->htmlEntityEncode(\PHP_INT_MAX, 'bogus')],
             'htmlEntityDecode' => [static fn(Xcapher $x): string => $x->htmlEntityDecode(\PHP_INT_MAX, 'bogus')],
             'trim' => [static fn(Xcapher $x): string => $x->trim("\xFF..")],
+            'isUrl' => [static fn(Xcapher $x): bool => $x->isUrl([null, 1, [], 'http'])],
+            'enum' => [
+                static fn(Xcapher $x): \UnitEnum => $x->enum(Suit::class),
+                static fn(Xcapher $x): \UnitEnum => $x->enum(Level::class),
+                static fn(Xcapher $x): \UnitEnum => $x->enum(Pure::class, Pure::Alpha),
+                self::invalidArgument('enum', 'No\Such\Enum'),
+                self::invalidArgument('enum', "Nul\0Enum"),
+            ],
+            'tryEnum' => [static fn(Xcapher $x): ?\UnitEnum => $x->tryEnum(Level::class), self::invalidArgument('tryEnum', \stdClass::class)],
+            'isEnumValue' => [static fn(Xcapher $x): bool => $x->isEnumValue(Suit::class), static fn(Xcapher $x): bool => $x->isEnumValue("Nul\0Enum")],
+            'instanceOf' => [static fn(Xcapher $x): object => $x->instanceOf(\Countable::class), self::invalidArgument('instanceOf', 'No\Such\ClassName')],
+            'tryInstanceOf' => [static fn(Xcapher $x): ?object => $x->tryInstanceOf(\Stringable::class)],
+            'isInstanceOf' => [static fn(Xcapher $x): bool => $x->isInstanceOf(\Countable::class, 'No\Such\ClassName', "Nul\0Class", '')],
+            'date' => [static fn(Xcapher $x): \DateTimeImmutable => $x->date('Y-m-d'), static fn(Xcapher $x): \DateTimeImmutable => $x->date("Y\0"), static fn(Xcapher $x): \DateTimeImmutable => $x->date('!!%%??')],
+            'tryDate' => [static fn(Xcapher $x): ?\DateTimeImmutable => $x->tryDate('U')],
+            'oneOf' => [static fn(Xcapher $x): mixed => $x->oneOf(['a', 1, null, \NAN, [], Suit::Hearts]), static fn(Xcapher $x): mixed => $x->oneOf([])],
+            'tryOneOf' => [static fn(Xcapher $x): mixed => $x->tryOneOf(['0', 0, false])],
+            'isOneOf' => [static fn(Xcapher $x): bool => $x->isOneOf(['', null, new \stdClass()])],
+            'array' => [static fn(Xcapher $x): array => $x->array(deep: true)],
+            'get' => [static fn(Xcapher $x): mixed => $x->get('a.0.b')->value(), static fn(Xcapher $x): mixed => $x->get(0)->value(), static fn(Xcapher $x): mixed => $x->get('', separator: '')->value(), static fn(Xcapher $x): mixed => $x->get("a\0b", [], "\0")->value()],
+            'has' => [static fn(Xcapher $x): bool => $x->has('self.self.self'), static fn(Xcapher $x): bool => $x->has(-1)],
+            'only' => [static fn(Xcapher $x): array => $x->only('a', 0, '')],
+            'except' => [static fn(Xcapher $x): array => $x->except('a', 0)],
+            'hasKeys' => [static fn(Xcapher $x): bool => $x->hasKeys('a', 0, '', 'self')],
+            'enums' => [static fn(Xcapher $x): array => $x->enums(Suit::class), self::invalidArgument('enums', \stdClass::class)],
+            'tryEnums' => [static fn(Xcapher $x): ?array => $x->tryEnums(Level::class)],
+            'every' => [static fn(Xcapher $x): bool => $x->every(static fn(Xcapher $item): bool => $item->isStringable())],
+            'some' => [static fn(Xcapher $x): bool => $x->some(static fn(Xcapher $item): bool => $item->html() !== '')],
+            'flatten' => [static fn(Xcapher $x): array => $x->flatten(1), static fn(Xcapher $x): array => $x->flatten(-5), static fn(Xcapher $x): array => $x->flatten(\PHP_INT_MAX)],
+            'dot' => [static fn(Xcapher $x): array => $x->dot(''), static fn(Xcapher $x): array => $x->dot("\0")],
+            'csvField' => [static fn(Xcapher $x): string => $x->csvField(';', "'", false), static fn(Xcapher $x): string => $x->csvField(',,', '')],
+            'csv' => [static fn(Xcapher $x): string => $x->csv("\t", '"', ''), static fn(Xcapher $x): string => $x->csv("\n")],
         ];
 
         foreach (new \ReflectionClass(Xcapher::class)->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {

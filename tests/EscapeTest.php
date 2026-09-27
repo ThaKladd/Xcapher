@@ -259,6 +259,7 @@ final class EscapeTest extends TestCase
     public function testHtmlEntityDefaults(): void
     {
         self::assertSame('&#039;&quot;', x('\'"')->htmlEntityEncode());
+        self::assertSame('&amp;amp;', x('&amp;')->htmlEntityEncode());
         self::assertSame("\u{FFFD}", x("\xFF")->htmlEntityEncode());
         self::assertSame('\'"', x('&#039;&quot;')->htmlEntityDecode());
     }

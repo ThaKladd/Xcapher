@@ -152,6 +152,12 @@ final class ValidateTest extends TestCase
         self::assertFalse(x('https://example.com')->isUrl(['ftp']));
     }
 
+    public function testIsUrlIgnoresNonStringSchemes(): void
+    {
+        self::assertTrue(x('https://example.com')->isUrl([null, 1, 'https']));
+        self::assertFalse(x('https://example.com')->isUrl([null, 1]));
+    }
+
     public function testIsDate(): void
     {
         self::assertTrue(x('2024-02-29')->isDate());
