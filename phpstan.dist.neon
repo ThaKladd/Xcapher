@@ -1,0 +1,17 @@
+includes:
+    - vendor/phpstan/phpstan-strict-rules/rules.neon
+    - vendor/phpstan/phpstan-phpunit/extension.neon
+    - vendor/phpstan/phpstan-phpunit/rules.neon
+
+parameters:
+    level: max
+    phpVersion: 80500
+    paths:
+        - src
+        - tests
+    excludePaths:
+        - src/xcapher (?)
+        - src/Error (?)
+    checkUninitializedProperties: true
+    checkBenevolentUnionTypes: true
+    reportUnmatchedIgnoredErrors: true

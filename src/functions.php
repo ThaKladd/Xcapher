@@ -1,10 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
+namespace Xcapher;
+
 /**
- * This function gives quick access to the Xchaper class
- * @param mixed $variable The variable to do actions upon
- * @return Xcapher the Xcapher object to begin with
+ * Wraps any value in an {@see Xcapher} instance.
  */
-function x(mixed $variable): Xcapher {
-    return new Xcapher($variable);
+function x(mixed $value): Xcapher
+{
+    return new Xcapher($value);
 }

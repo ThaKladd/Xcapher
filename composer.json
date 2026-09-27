@@ -1,21 +1,18 @@
 {
     "name": "xcapher/xcapher",
-    "description": "A library to escape any value, written in PHP for PHP",
+    "description": "Escape, cast, validate and sanitize any PHP value through one small fluent API",
     "type": "library",
+    "license": "MIT",
     "keywords": [
-        "PHP",
+        "php",
         "escape",
         "escaper",
         "sanitizer",
-        "validator"
+        "validator",
+        "cast",
+        "xss",
+        "sql"
     ],
-    "license": "MIT",
-    "autoload": {
-        "psr-4": {
-            "": "src/xcapher"
-        },
-        "files": ["src/functions.php", "src/Error/XcapherError.php"]
-    },
     "authors": [
         {
             "name": "John Larsen",
@@ -25,6 +22,62 @@
         }
     ],
     "homepage": "https://github.com/ThaKladd/Xcapher",
-    "minimum-stability": "dev",
-    "require": { "php": ">=8.1" }
+    "support": {
+        "issues": "https://github.com/ThaKladd/Xcapher/issues",
+        "source": "https://github.com/ThaKladd/Xcapher"
+    },
+    "require": {
+        "php": ">=8.5",
+        "ext-mbstring": "*"
+    },
+    "suggest": {
+        "ext-intl": "Better transliteration in slug()",
+        "ext-mysqli": "Escaping and quoting for mysqli connections",
+        "ext-pgsql": "Escaping and quoting for PgSql connections",
+        "ext-pdo": "Escaping and quoting for PDO connections"
+    },
+    "autoload": {
+        "psr-4": {
+            "Xcapher\\": "src/"
+        },
+        "files": [
+            "src/functions.php",
+            "src/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Xcapher\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=1G",
+        "lint": "php-cs-fixer check --diff",
+        "fix": "php-cs-fixer fix",
+        "check": [
+            "@lint",
+            "@analyse",
+            "@test"
+        ]
+    },
+    "scripts-descriptions": {
+        "test": "Run the PHPUnit test suite",
+        "analyse": "Run PHPStan static analysis",
+        "lint": "Check coding standards without changing files",
+        "fix": "Fix coding standard violations",
+        "check": "Run lint, static analysis and tests"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "phpstan/phpstan": "^2.2",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "phpunit/phpunit": "^13.3"
+    }
 }
