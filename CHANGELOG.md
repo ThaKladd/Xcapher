@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-27
+
 The 1.0 rewrite. See "Upgrading from 0.x" in the README.
 
 ### Added
@@ -55,3 +57,6 @@ The 1.0 rewrite. See "Upgrading from 0.x" in the README.
   `isIterable()`.
 - Methods now throw a typed exception instead of emitting PHP warnings, `TypeError` or `ValueError`. This
   covers, for example, NaN in PHP 8.5, arrays converted to strings and floats outside the int range.
+
+[Unreleased]: https://github.com/ThaKladd/Xcapher/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ThaKladd/Xcapher/releases/tag/v1.0.0
