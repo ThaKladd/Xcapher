@@ -2328,7 +2328,7 @@ final readonly class Xcapher
 
     private static function parseBool(string $text): bool
     {
-        return filter_var($text, \FILTER_VALIDATE_BOOL, \FILTER_NULL_ON_FAILURE) ?? $text !== '';
+        return filter_var($text, \FILTER_VALIDATE_BOOLEAN, \FILTER_NULL_ON_FAILURE) ?? $text !== '';
     }
 
     private static function isBase64String(string $text): bool
