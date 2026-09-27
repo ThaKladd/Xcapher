@@ -10,8 +10,6 @@ parameters:
         - src
         - tests
     excludePaths:
-        - src/xcapher (?)
-        - src/Error (?)
     checkUninitializedProperties: true
     checkBenevolentUnionTypes: true
     reportUnmatchedIgnoredErrors: true

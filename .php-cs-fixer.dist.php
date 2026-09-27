@@ -8,7 +8,6 @@ use PhpCsFixer\Runner\Parallel\ParallelConfigFactory;
 
 $finder = Finder::create()
     ->in([__DIR__ . '/src', __DIR__ . '/tests', __DIR__ . '/examples'])
-    ->exclude(['xcapher', 'Error'])
     ->append([__FILE__]);
 
 return new Config()
