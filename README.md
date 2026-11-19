@@ -151,7 +151,7 @@ Choose the method for the context the output will land in. These methods convert
 | `htmlEntityDecode($flags, $encoding)` | Decoding entities | `&lt;b&gt;` → `<b>` |
 | `xml()` | XML text and attributes; removes characters that are illegal in XML 1.0 | `<a>&` → `&lt;a&gt;&amp;` |
 | `js()` | Inside a quoted JavaScript string | `</script>` → `\x3C\x2Fscript\x3E` |
-| `jsValue()` | A value embedded as a JS/JSON literal in `<script>` or an attribute | `['a' => '</b>']` → `{"a":"\u003C/b\u003E"}` |
+| `jsValue()` | A JS/JSON literal in `<script>`. For a quoted HTML attribute, use `x(x($value)->jsValue())->html()`. | `['a' => '</b>']` → `{"a":"\u003C/b\u003E"}` |
 | `css()` | CSS strings and identifiers | `a b;` → `a\20 b\3B ` |
 | `htmlAttributes()` | A whole attribute string from an array (see below) | `['class' => ['btn', 'active'], 'disabled' => true]` → `class="btn active" disabled` |
 
@@ -208,6 +208,8 @@ identifier, a `LIKE` pattern or a dynamic `ORDER BY`, use these methods. They ac
 | `quote($connection)` | Returns a complete literal: `NULL`, a number, `TRUE`/`FALSE` (PostgreSQL) or `1`/`0`, or a quoted string. Strings need a live connection; other values also accept a `Database`. |
 | `identifier($connection, bool $qualified = false)` | Quotes an identifier: `` `name` `` for MySQL, `"name"` for PostgreSQL and SQLite, doubling any embedded quotes. With `$qualified`, `schema.table` becomes `"schema"."table"`. |
 | `like(string $escape = '\\')` | Escapes `%`, `_` and the escape character so the value matches literally. |
+
+For PostgreSQL connections, `escape()` and `quote()` throw `EscapeException` if the text contains a NUL byte.
 
 ```php
 use Xcapher\Database;

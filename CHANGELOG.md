@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-19
+
+### Fixed
+
+- Reject NUL bytes in PostgreSQL text literals to prevent silent truncation.
+- Respect private property visibility when reading a nested Xcapher object.
+- Preserve fractional Unix timestamps before 1970 when converting between dates and floats.
+- Accept large Base64 payloads and reject malformed Base64URL padding and surrounding NUL bytes.
+- Escape Unicode characters that case-fold to ASCII in `htmlAttr()`, `js()` and `css()`.
+- Return false from `isEmpty()` and `isBlank()` when a Countable object fails to report its size.
+- Clarify how to embed `jsValue()` output in a quoted HTML attribute.
+
 ## [1.0.0] - 2026-09-27
 
 The 1.0 rewrite. See "Upgrading from 0.x" in the README.
@@ -58,5 +70,6 @@ The 1.0 rewrite. See "Upgrading from 0.x" in the README.
 - Methods now throw a typed exception instead of emitting PHP warnings, `TypeError` or `ValueError`. This
   covers, for example, NaN in PHP 8.5, arrays converted to strings and floats outside the int range.
 
-[Unreleased]: https://github.com/ThaKladd/Xcapher/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ThaKladd/Xcapher/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ThaKladd/Xcapher/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ThaKladd/Xcapher/releases/tag/v1.0.0

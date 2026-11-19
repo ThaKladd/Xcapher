@@ -38,6 +38,7 @@ final class EscapeTest extends TestCase
         yield 'space and equals' => ['a b=c', 'a&#x20;b&#x3D;c'];
         yield 'quotes' => ['"\'', '&quot;&#x27;'];
         yield 'named entities' => ['<&>', '&lt;&amp;&gt;'];
+        yield 'Unicode case fold of ASCII' => ['Kſ', '&#x212A;&#x017F;'];
         yield 'latin-1' => ['é', '&#xE9;'];
         yield 'beyond latin-1' => ['€', '&#x20AC;'];
         yield 'astral' => ["\u{1F600}", '&#x1F600;'];
@@ -84,6 +85,7 @@ final class EscapeTest extends TestCase
         yield 'quotes' => ['"\'', '\x22\x27'];
         yield 'script close' => ['</script>', '\x3C\x2Fscript\x3E'];
         yield 'newline' => ["\n", '\x0A'];
+        yield 'Unicode case fold of ASCII' => ['Kſ', '\u212A\u017F'];
         yield 'BMP' => ['é', '\u00E9'];
         yield 'line separator' => ["\u{2028}", '\u2028'];
         yield 'astral uses surrogate pair' => ["\u{1F600}", '\uD83D\uDE00'];
@@ -105,6 +107,7 @@ final class EscapeTest extends TestCase
     {
         self::assertSame('a\20 b\3B \7D ', x('a b;}')->css());
         self::assertSame('\E9 ', x('é')->css());
+        self::assertSame('\212A \17F ', x('Kſ')->css());
         self::assertSame('abc123', x('abc123')->css());
     }
 
@@ -172,6 +175,16 @@ final class EscapeTest extends TestCase
         self::assertSame('', x('')->base64Decode());
     }
 
+    public function testLongBase64RoundTrip(): void
+    {
+        $payload = str_repeat("binary\xFF", 100_000);
+        $encoded = x($payload)->base64Encode();
+
+        self::assertTrue(x($encoded)->isBase64());
+        self::assertSame($payload, x($encoded)->base64Decode());
+        self::assertSame($payload, x(x($payload)->base64UrlEncode())->base64UrlDecode());
+    }
+
     /**
      * @return iterable<string, array{string}>
      */
@@ -179,6 +192,7 @@ final class EscapeTest extends TestCase
     {
         yield 'invalid character' => ['ab$d'];
         yield 'missing padding' => ['YQ'];
+        yield 'surrounding NUL' => ["\0YQ==\0"];
         yield 'url alphabet' => ['aGk_Pz4-'];
     }
 
@@ -195,6 +209,10 @@ final class EscapeTest extends TestCase
     public static function invalidBase64UrlProvider(): iterable
     {
         yield 'standard alphabet' => ['aGk/Pz4+'];
+        yield 'padding only' => ['=='];
+        yield 'missing second padding byte' => ['YQ='];
+        yield 'excess padding' => ['YWJj='];
+        yield 'surrounding NUL' => ["\0YQ==\0"];
         yield 'impossible length' => ['abcde'];
     }
 

@@ -198,4 +198,18 @@ final class ValidateTest extends TestCase
 
         self::assertSame([Type::Bool, Type::Int, Type::Float, Type::String], array_values($scalars));
     }
+
+    public function testCountFailureDoesNotMarkAnObjectEmpty(): void
+    {
+        $value = x(new class implements \Countable {
+            public function count(): int
+            {
+                throw new \RuntimeException('Count failed.');
+            }
+        });
+
+        self::assertNull($value->count());
+        self::assertFalse($value->isEmpty());
+        self::assertFalse($value->isBlank());
+    }
 }

@@ -517,4 +517,13 @@ final class ArrayTest extends TestCase
         $this->expectException(EscapeException::class);
         x(['a b'])->htmlAttributes();
     }
+
+    public function testNestedWrapperOnlyExposesPublicProperties(): void
+    {
+        $nested = x(['item' => x('value')]);
+
+        self::assertSame([], $nested->get('item')->array());
+        self::assertSame(['item' => []], $nested->array(deep: true));
+        self::assertFalse($nested->has('item.value'));
+    }
 }

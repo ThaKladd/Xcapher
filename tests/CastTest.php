@@ -176,6 +176,7 @@ final class CastTest extends TestCase
         yield 'exponent' => ['1.5e2', 150.0];
         yield 'null' => [null, 0.0];
         yield 'true' => [true, 1.0];
+        yield 'before the epoch' => [new \DateTimeImmutable('1969-12-31 23:59:59.750000 UTC'), -0.25];
         yield 'date keeps microseconds' => [new \DateTimeImmutable('@1700000000.25'), 1700000000.25];
     }
 

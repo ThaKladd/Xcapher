@@ -187,6 +187,8 @@ final class ObjectTest extends TestCase
         self::assertSame(date_default_timezone_get(), $date->getTimezone()->getName());
         self::assertSame('1700000000.250000', x(1700000000.25)->date()->format('U.u'));
         self::assertSame(-1, x(-1)->date()->getTimestamp());
+        self::assertSame('-1.750000', x(-0.25)->date()->format('U.u'));
+        self::assertSame('-2.750000', x(-1.25)->date()->format('U.u'));
     }
 
     public function testDateFromStringsKeepsAnExplicitOffset(): void

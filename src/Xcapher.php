@@ -737,7 +737,7 @@ final readonly class Xcapher
      */
     public function htmlAttr(): string
     {
-        return self::replace('/[^a-z0-9,.\-_]/iu', $this->utf8(), static function (string $char): string {
+        return self::replace('/[^A-Za-z0-9,.\-_]/u', $this->utf8(), static function (string $char): string {
             $ord = mb_ord($char, 'UTF-8');
 
             if (($ord <= 0x1F && $char !== "\t" && $char !== "\n" && $char !== "\r") || ($ord >= 0x7F && $ord <= 0x9F)) {
@@ -800,7 +800,7 @@ final readonly class Xcapher
      */
     public function js(): string
     {
-        return self::replace('/[^a-z0-9,._]/iu', $this->utf8(), static function (string $char): string {
+        return self::replace('/[^A-Za-z0-9,._]/u', $this->utf8(), static function (string $char): string {
             $ord = mb_ord($char, 'UTF-8');
 
             if ($ord < 0x80) {
@@ -818,8 +818,8 @@ final readonly class Xcapher
     }
 
     /**
-     * Encodes the value as a JavaScript/JSON literal that is safe to embed in a <script> block or
-     * an HTML attribute (<, >, &, ' and " are hex-escaped).
+     * Encodes the value as a JavaScript/JSON literal that is safe to embed in a <script> block.
+     * For a quoted HTML attribute, pass the resulting literal through {@see html()} as well.
      *
      * @throws CastException when the value cannot be JSON encoded
      */
@@ -835,7 +835,7 @@ final readonly class Xcapher
      */
     public function css(): string
     {
-        return self::replace('/[^a-z0-9]/iu', $this->utf8(), static fn(string $char): string => \sprintf('\%X ', mb_ord($char, 'UTF-8')));
+        return self::replace('/[^A-Za-z0-9]/u', $this->utf8(), static fn(string $char): string => \sprintf('\%X ', mb_ord($char, 'UTF-8')));
     }
 
     /**
@@ -989,7 +989,7 @@ final readonly class Xcapher
      */
     public function base64Decode(): string
     {
-        $text = trim($this->castString());
+        $text = trim($this->castString(), " \t\r\n\v\f");
 
         if (!self::isBase64String($text)) {
             throw CastException::create($this->value, 'decoded Base64', 'invalid Base64 input');
@@ -1015,14 +1015,17 @@ final readonly class Xcapher
      */
     public function base64UrlDecode(): string
     {
-        $text = trim($this->castString());
+        $text = trim($this->castString(), " \t\r\n\v\f");
 
-        if (preg_match('/^[A-Za-z0-9_-]*={0,2}$/', $text) !== 1) {
+        if (strpbrk($text, '+/') !== false) {
             throw CastException::create($this->value, 'decoded Base64URL', 'invalid Base64URL input');
         }
 
-        $text = strtr(rtrim($text, '='), '-_', '+/');
-        $text = str_pad($text, \strlen($text) + (4 - \strlen($text) % 4) % 4, '=');
+        $text = strtr($text, '-_', '+/');
+
+        if (!str_ends_with($text, '=')) {
+            $text .= str_repeat('=', (4 - \strlen($text) % 4) % 4);
+        }
 
         if (!self::isBase64String($text)) {
             throw CastException::create($this->value, 'decoded Base64URL', 'invalid Base64URL input');
@@ -1046,7 +1049,7 @@ final readonly class Xcapher
      */
     public function escape(mixed $connection): string
     {
-        $text = $this->castString();
+        $text = $this->sqlText($connection);
 
         return self::escaping(static function () use ($connection, $text): string {
             if ($connection instanceof \mysqli) {
@@ -1105,7 +1108,7 @@ final readonly class Xcapher
             return is_finite($value) ? (string) $value : throw new EscapeException('Only finite floats can be quoted as SQL literals.');
         }
 
-        $text = $this->castString();
+        $text = $this->sqlText($database);
 
         return self::escaping(static function () use ($connection, $text): string {
             $quoted = match (true) {
@@ -1559,7 +1562,7 @@ final readonly class Xcapher
     {
         $value = $this->value;
 
-        return $value === null || $value === '' || $value === [] || ($value instanceof \Countable && \count($value) === 0);
+        return $value === null || $value === '' || $this->count() === 0;
     }
 
     /**
@@ -1802,7 +1805,7 @@ final readonly class Xcapher
             \is_string($value) => self::parseNumber($value),
             \is_array($value) => $value === [] ? 0 : 1,
             $value instanceof \BackedEnum => \is_int($value->value) ? $value->value : self::parseNumber($value->value),
-            $value instanceof \DateTimeInterface => $target === 'float' ? (float) $value->format('U.u') : $value->getTimestamp(),
+            $value instanceof \DateTimeInterface => $target === 'float' ? $value->getTimestamp() + $value->getMicrosecond() / 1_000_000 : $value->getTimestamp(),
             $value instanceof \Stringable => self::parseNumber(self::stringify($value, $target)),
             default => throw CastException::create($value, $target),
         };
@@ -1830,7 +1833,7 @@ final readonly class Xcapher
         return match (true) {
             $value === null => [],
             $value instanceof \UnitEnum, $value instanceof \DateTimeInterface, $value instanceof \Closure => [$value],
-            \is_object($value) => get_object_vars($value),
+            \is_object($value) => publicObjectProperties($value),
             default => [$value],
         };
     }
@@ -1908,11 +1911,11 @@ final readonly class Xcapher
         }
 
         try {
-            $date = match (true) {
-                \is_int($value) => new \DateTimeImmutable('@' . $value),
-                \is_float($value) && is_finite($value) => \DateTimeImmutable::createFromFormat('U.u', \sprintf('%.6F', $value)),
-                default => self::parseDate($this->text(), $format),
-            };
+            if (\is_int($value) || \is_float($value)) {
+                return \DateTimeImmutable::createFromTimestamp($value)->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+            }
+
+            $date = self::parseDate($this->text(), $format);
         } catch (\Throwable $e) {
             throw CastException::create($value, 'date', $e->getMessage());
         }
@@ -1921,8 +1924,7 @@ final readonly class Xcapher
             throw CastException::create($value, 'date');
         }
 
-        // Timestamps are parsed as UTC; show them in the default time zone like every other date.
-        return \is_int($value) || \is_float($value) ? $date->setTimezone(new \DateTimeZone(date_default_timezone_get())) : $date;
+        return $date;
     }
 
     /**
@@ -2050,7 +2052,7 @@ final readonly class Xcapher
         }
 
         if (\is_object($container)) {
-            $properties = get_object_vars($container);
+            $properties = publicObjectProperties($container);
 
             return \array_key_exists($key, $properties) ? [true, $properties[$key]] : [false, null];
         }
@@ -2333,7 +2335,7 @@ final readonly class Xcapher
 
     private static function isBase64String(string $text): bool
     {
-        return preg_match('/^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/D', $text) === 1;
+        return \strlen($text) % 4 === 0 && preg_match('~^[A-Za-z0-9+/]*+={0,2}$~D', $text) === 1;
     }
 
     /**
@@ -2367,6 +2369,17 @@ final readonly class Xcapher
         } finally {
             restore_error_handler();
         }
+    }
+
+    private function sqlText(mixed $connection): string
+    {
+        $text = $this->castString();
+
+        if (str_contains($text, "\0") && Database::detect($connection) === Database::PostgreSql) {
+            throw new EscapeException('PostgreSQL text cannot contain NUL bytes.');
+        }
+
+        return $text;
     }
 
     /**

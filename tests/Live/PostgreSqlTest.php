@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Xcapher\Database;
+use Xcapher\Exception\EscapeException;
 use Xcapher\Xcapher;
 
 use function Xcapher\x;
@@ -21,6 +22,7 @@ use function Xcapher\x;
  */
 #[CoversClass(Xcapher::class)]
 #[CoversClass(Database::class)]
+#[CoversClass(EscapeException::class)]
 #[Group('database')]
 final class PostgreSqlTest extends TestCase
 {
@@ -40,6 +42,26 @@ final class PostgreSqlTest extends TestCase
     public function testDetectsTheDialect(string $driver): void
     {
         self::assertSame(Database::PostgreSql, Database::detect($this->connect($driver)));
+    }
+
+    /**
+     * @param 'pgsql'|'pdo' $driver
+     */
+    #[DataProvider('driverProvider')]
+    public function testQuoteRejectsNulBytes(string $driver): void
+    {
+        $this->expectException(EscapeException::class);
+        x("a\0b")->quote($this->connect($driver));
+    }
+
+    /**
+     * @param 'pgsql'|'pdo' $driver
+     */
+    #[DataProvider('driverProvider')]
+    public function testEscapeRejectsNulBytes(string $driver): void
+    {
+        $this->expectException(EscapeException::class);
+        x("a\0b")->escape($this->connect($driver));
     }
 
     /**
