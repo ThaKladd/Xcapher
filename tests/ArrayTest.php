@@ -55,6 +55,14 @@ final class ArrayTest extends TestCase
         self::assertSame('Oslo', x($data)->get('user/address/city', separator: '/')->value());
     }
 
+    public function testLiteralNullKeyTakesPrecedenceOverNestedPath(): void
+    {
+        $value = x(['user.name' => null, 'user' => ['name' => 'nested']]);
+
+        self::assertTrue($value->has('user.name'));
+        self::assertNull($value->get('user.name', 'missing')->value());
+    }
+
     public function testGetReturnsAWrappedNullForMissingPaths(): void
     {
         $data = ['user' => ['name' => 'Bjørn', 'age' => '42']];
@@ -281,6 +289,30 @@ final class ArrayTest extends TestCase
         self::assertSame(['user.name' => 'Bjørn', 'user.tags.0' => 'a', 'user.tags.1' => 'b', 'user.empty' => [], 'top' => 1], x($nested)->dot());
         self::assertSame(['a/b' => 1], x(['a' => ['b' => 1]])->dot('/'));
         self::assertSame([0 => 'x'], x(['x'])->dot());
+    }
+
+    public function testRecursiveMethodsAcceptExactly512Levels(): void
+    {
+        $array = ['leaf'];
+        $object = (object) $array;
+
+        for ($level = 1; $level < 512; ++$level) {
+            $array = [$array];
+            $object = (object) [$object];
+        }
+
+        self::assertSame(['leaf'], x($array)->flatten());
+        self::assertSame([str_repeat('0.', 511) . '0' => 'leaf'], x($array)->dot());
+        self::assertSame($array, x($array)->array(deep: true));
+        self::assertSame($array, x($object)->array(deep: true));
+        self::assertSame(['fallback'], x([$array])->array(['fallback'], deep: true));
+        self::assertSame(['fallback'], x([$object])->array(['fallback'], deep: true));
+
+        // A sibling at the limit must not hide a deeper branch.
+        self::assertSame(513, x([$array[0], $array])->depth());
+
+        $this->expectException(CastException::class);
+        x([$array])->dot();
     }
 
     public function testRecursiveStructuresThrowInsteadOfLoopingForever(): void

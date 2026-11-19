@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-19
+
+### Added
+
+- Regression tests for the 512-level nesting limit, literal dotted keys with null values,
+  UTF-8 substitution settings, Windows device names with superscript digits, and Base64 validation.
+
 ## [1.1.0] - 2026-11-19
 
 ### Fixed
@@ -70,6 +77,7 @@ The 1.0 rewrite. See "Upgrading from 0.x" in the README.
 - Methods now throw a typed exception instead of emitting PHP warnings, `TypeError` or `ValueError`. This
   covers, for example, NaN in PHP 8.5, arrays converted to strings and floats outside the int range.
 
-[Unreleased]: https://github.com/ThaKladd/Xcapher/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ThaKladd/Xcapher/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/ThaKladd/Xcapher/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/ThaKladd/Xcapher/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ThaKladd/Xcapher/releases/tag/v1.0.0

@@ -190,6 +190,7 @@ final class ValidateTest extends TestCase
     public function testIsBase64RejectsATrailingNewline(): void
     {
         self::assertFalse(x("aGk=\n")->isBase64());
+        self::assertFalse(x("YWI\n")->isBase64());
     }
 
     public function testEveryScalarTypeIsScalar(): void

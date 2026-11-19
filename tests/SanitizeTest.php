@@ -76,6 +76,19 @@ final class SanitizeTest extends TestCase
         self::assertSame($expected, x($value)->slug());
     }
 
+    public function testCleaningInvalidUtf8RestoresTheCallersSubstituteCharacter(): void
+    {
+        $previous = mb_substitute_character();
+        mb_substitute_character(0x3F);
+
+        try {
+            self::assertSame("\u{FFFD}a", x("\xFFa")->lower());
+            self::assertSame(0x3F, mb_substitute_character());
+        } finally {
+            mb_substitute_character($previous);
+        }
+    }
+
     public function testSlugSeparator(): void
     {
         self::assertSame('hello_world', x('Hello World')->slug('_'));
@@ -128,6 +141,7 @@ final class SanitizeTest extends TestCase
     public static function reservedNameProvider(): iterable
     {
         yield 'lower case device' => ['con', '_con'];
+        yield 'device with superscript digit' => ['LPT².txt', '_LPT².txt'];
         yield 'numbered device' => ['COM1.log', '_COM1.log'];
         yield 'device as suffix' => ['XCON', 'XCON'];
         yield 'device as prefix' => ['CONSOLE', 'CONSOLE'];
